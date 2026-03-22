@@ -124,6 +124,12 @@ impl WasmMeshResult {
         js_sys::Float32Array::from(&self.output.ao[..])
     }
 
+    /// Copy block IDs into a new Float32Array (cast from u16 for use as vertex attribute).
+    pub fn block_ids(&self) -> js_sys::Float32Array {
+        let floats: Vec<f32> = self.output.block_ids.iter().map(|&id| id as f32).collect();
+        js_sys::Float32Array::from(&floats[..])
+    }
+
     /// Copy indices into a new Uint32Array.
     pub fn indices(&self) -> js_sys::Uint32Array {
         js_sys::Uint32Array::from(&self.output.indices[..])

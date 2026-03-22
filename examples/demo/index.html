@@ -309,35 +309,213 @@ const RENDER_DISTANCE = 6;       // chunks from camera center
 const UNLOAD_DISTANCE = 8;       // chunks before disposal
 const CHUNKS_PER_FRAME = 3;      // max chunks to gen/mesh per frame
 
-// ── Terrain generation ─────────────────────────────
-function terrainHeight(worldX, worldZ) {
-  return Math.max(1, Math.min(CHUNK_SIZE - 1,
-    12
-    + Math.floor(
-        8 * Math.sin(worldX * 0.08) * Math.cos(worldZ * 0.06)
-      + 4 * Math.sin(worldX * 0.15 + worldZ * 0.12)
-      + 2 * Math.sin(worldX * 0.3 - worldZ * 0.2)
-    )
-  ));
+// ── Block IDs ─────────────────────────────────────
+const BLOCK_AIR    = 0;
+const BLOCK_STONE  = 1;
+const BLOCK_DIRT   = 2;
+const BLOCK_GRASS  = 3;
+const BLOCK_SAND   = 4;
+const BLOCK_WATER  = 5;
+const BLOCK_SNOW   = 6;
+const BLOCK_GRAVEL = 7;
+const BLOCK_LOG    = 8;
+const BLOCK_LEAVES = 9;
+
+// ── Hash-based noise ──────────────────────────────
+// Self-contained value noise — no external deps needed.
+function _hash(x, y) {
+  let h = (x * 374761393 + y * 668265263 + 1376312589) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h = h ^ (h >>> 16);
+  return (h & 0x7fffffff) / 0x7fffffff; // 0..1
 }
 
+function _hash3(x, y, z) {
+  let h = (x * 374761393 + y * 668265263 + z * 1274126177 + 1376312589) | 0;
+  h = Math.imul(h ^ (h >>> 13), 2246822519);
+  h = h ^ (h >>> 16);
+  return (h & 0x7fffffff) / 0x7fffffff;
+}
+
+function _lerp(a, b, t) { return a + (b - a) * t; }
+function _smooth(t) { return t * t * (3 - 2 * t); }
+
+function noise2d(x, y) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = _smooth(x - ix), fy = _smooth(y - iy);
+  return _lerp(
+    _lerp(_hash(ix, iy),     _hash(ix + 1, iy),     fx),
+    _lerp(_hash(ix, iy + 1), _hash(ix + 1, iy + 1), fx),
+    fy
+  );
+}
+
+function noise3d(x, y, z) {
+  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
+  const fx = _smooth(x - ix), fy = _smooth(y - iy), fz = _smooth(z - iz);
+  return _lerp(
+    _lerp(
+      _lerp(_hash3(ix, iy, iz),     _hash3(ix+1, iy, iz),     fx),
+      _lerp(_hash3(ix, iy+1, iz),   _hash3(ix+1, iy+1, iz),   fx), fy),
+    _lerp(
+      _lerp(_hash3(ix, iy, iz+1),   _hash3(ix+1, iy, iz+1),   fx),
+      _lerp(_hash3(ix, iy+1, iz+1), _hash3(ix+1, iy+1, iz+1), fx), fy),
+    fz
+  );
+}
+
+function fbm2d(x, y, octaves) {
+  let val = 0, amp = 1, freq = 1, max = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += noise2d(x * freq, y * freq) * amp;
+    max += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return val / max;
+}
+
+function fbm3d(x, y, z, octaves) {
+  let val = 0, amp = 1, freq = 1, max = 0;
+  for (let i = 0; i < octaves; i++) {
+    val += noise3d(x * freq, y * freq, z * freq) * amp;
+    max += amp;
+    amp *= 0.5;
+    freq *= 2;
+  }
+  return val / max;
+}
+
+// ── Biome system ──────────────────────────────────
+// Temperature and moisture fields drive biome selection.
+const SEA_LEVEL = 10;
+
+// Returns: { biome, baseHeight }
+function getBiome(wx, wz) {
+  const temp     = fbm2d(wx * 0.004 + 100, wz * 0.004 + 100, 4);   // 0..1
+  const moisture = fbm2d(wx * 0.005 - 200, wz * 0.005 + 300, 4);   // 0..1
+
+  // Continental shape: broad, slow undulation
+  const continent = fbm2d(wx * 0.006, wz * 0.006, 5);
+  // Detail noise adds local roughness
+  const detail    = fbm2d(wx * 0.03, wz * 0.03, 3);
+
+  if (temp > 0.6 && moisture < 0.35) {
+    // ── Desert ──
+    const h = SEA_LEVEL + 1 + Math.floor((continent * 4) + detail * 2);
+    return { biome: 'desert', height: Math.min(h, CHUNK_SIZE - 1) };
+  }
+
+  if (temp < 0.3) {
+    // ── Mountains ──
+    const ridge = Math.abs(noise2d(wx * 0.012 + 500, wz * 0.012 + 500) - 0.5) * 2; // 0..1
+    const h = SEA_LEVEL + 4 + Math.floor(continent * 12 + ridge * 14 + detail * 3);
+    return { biome: 'mountain', height: Math.min(h, CHUNK_SIZE - 1) };
+  }
+
+  if (moisture > 0.55) {
+    // ── Forest ──
+    const h = SEA_LEVEL + 2 + Math.floor(continent * 8 + detail * 4);
+    return { biome: 'forest', height: Math.min(h, CHUNK_SIZE - 1) };
+  }
+
+  // ── Plains ──
+  const h = SEA_LEVEL + 1 + Math.floor(continent * 6 + detail * 3);
+  return { biome: 'plains', height: Math.min(h, CHUNK_SIZE - 1) };
+}
+
+// ── Terrain generation ─────────────────────────────
 function generateChunkData(cx, cz) {
   const chunk = WasmChunk.new_default();
-  const offsetX = cx * CHUNK_SIZE;
-  const offsetZ = cz * CHUNK_SIZE;
+  const ox = cx * CHUNK_SIZE;
+  const oz = cz * CHUNK_SIZE;
 
+  // First pass: terrain + caves + water
   for (let lz = 0; lz < CHUNK_SIZE; lz++) {
     for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      const h = terrainHeight(offsetX + lx, offsetZ + lz);
-      for (let y = 0; y < h; y++) {
+      const wx = ox + lx;
+      const wz = oz + lz;
+      const { biome, height } = getBiome(wx, wz);
+
+      for (let y = 0; y < height; y++) {
+        // Cave carving with 3D noise
+        if (y > 0 && y < height - 1) {
+          const cave = fbm3d(wx * 0.05, y * 0.07, wz * 0.05, 3);
+          if (cave > 0.62) continue; // carve cave
+        }
+
         let blockId;
-        if (y < h - 3) blockId = 1;
-        else if (y < h - 1) blockId = 2;
-        else blockId = 3;
+        if (biome === 'desert') {
+          blockId = y < height - 4 ? BLOCK_STONE : BLOCK_SAND;
+        } else if (biome === 'mountain') {
+          if (y < height - 2) blockId = BLOCK_STONE;
+          else if (height > 24) blockId = BLOCK_SNOW;
+          else if (height > 18) blockId = BLOCK_GRAVEL;
+          else blockId = BLOCK_STONE;
+        } else {
+          // Plains / Forest
+          if (y < height - 3) blockId = BLOCK_STONE;
+          else if (y < height - 1) blockId = BLOCK_DIRT;
+          else {
+            // Beach sand near water
+            blockId = (height <= SEA_LEVEL + 2) ? BLOCK_SAND : BLOCK_GRASS;
+          }
+        }
         chunk.set_block(lx, y, lz, blockId);
+      }
+
+      // Water fill
+      for (let y = height; y < SEA_LEVEL; y++) {
+        chunk.set_block(lx, y, lz, BLOCK_WATER);
       }
     }
   }
+
+  // Second pass: trees (forest & plains biomes)
+  // Use deterministic hash per column so trees are consistent across chunks
+  for (let lz = 2; lz < CHUNK_SIZE - 2; lz++) {
+    for (let lx = 2; lx < CHUNK_SIZE - 2; lx++) {
+      const wx = ox + lx;
+      const wz = oz + lz;
+      const { biome, height } = getBiome(wx, wz);
+
+      if (height <= SEA_LEVEL + 2) continue; // no trees on beaches / underwater
+
+      const treeDensity = biome === 'forest' ? 0.93 : biome === 'plains' ? 0.985 : 1.0;
+      if (_hash(wx * 7 + 1337, wz * 13 + 7331) > treeDensity) continue;
+
+      // Don't place trees where surface isn't grass
+      if (chunk.get_block(lx, height - 1, lz) !== BLOCK_GRASS) continue;
+
+      const trunkH = 4 + Math.floor(_hash(wx + 42, wz + 99) * 3); // 4-6 blocks
+      const topY = height + trunkH;
+      if (topY >= CHUNK_SIZE - 2) continue;
+
+      // Trunk
+      for (let ty = height; ty < topY; ty++) {
+        chunk.set_block(lx, ty, lz, BLOCK_LOG);
+      }
+
+      // Leaf canopy (sphere-ish)
+      const leafR = 2;
+      for (let dy = -1; dy <= 2; dy++) {
+        const ly = topY + dy;
+        if (ly < 0 || ly >= CHUNK_SIZE) continue;
+        const r = dy === 2 ? 1 : leafR;
+        for (let dxx = -r; dxx <= r; dxx++) {
+          for (let dzz = -r; dzz <= r; dzz++) {
+            if (dxx * dxx + dzz * dzz > r * r + 1) continue;
+            const fx = lx + dxx, fz = lz + dzz;
+            if (fx < 0 || fx >= CHUNK_SIZE || fz < 0 || fz >= CHUNK_SIZE) continue;
+            if (chunk.get_block(fx, ly, fz) === BLOCK_AIR) {
+              chunk.set_block(fx, ly, fz, BLOCK_LEAVES);
+            }
+          }
+        }
+      }
+    }
+  }
+
   return chunk;
 }
 
@@ -346,12 +524,15 @@ function createTerrainMaterial() {
   return new THREE.ShaderMaterial({
     vertexShader: /* glsl */ `
       attribute float ao;
+      attribute float blockId;
       varying float vAo;
+      varying float vBlockId;
       varying vec3 vNormal;
       varying vec3 vWorldPos;
 
       void main() {
         vAo = ao;
+        vBlockId = blockId;
         vNormal = normalMatrix * normal;
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos = wp.xyz;
@@ -361,34 +542,50 @@ function createTerrainMaterial() {
     fragmentShader: /* glsl */ `
       uniform vec3 uCameraTarget;
       varying float vAo;
+      varying float vBlockId;
       varying vec3 vNormal;
       varying vec3 vWorldPos;
 
+      // Simple hash for per-block variation
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      }
+
       void main() {
-        float y = vWorldPos.y;
-        vec3 stone = vec3(0.32, 0.31, 0.33);
-        vec3 dirt  = vec3(0.45, 0.32, 0.22);
-        vec3 grass = vec3(0.30, 0.52, 0.26);
-        vec3 snow  = vec3(0.78, 0.80, 0.82);
+        int bid = int(vBlockId + 0.5);
 
-        vec3 color = stone;
-        float t;
+        // Per-block colors
+        vec3 stone  = vec3(0.34, 0.33, 0.35);
+        vec3 dirt   = vec3(0.45, 0.32, 0.22);
+        vec3 grass  = vec3(0.30, 0.55, 0.22);
+        vec3 sand   = vec3(0.76, 0.70, 0.50);
+        vec3 water  = vec3(0.18, 0.35, 0.55);
+        vec3 snow   = vec3(0.85, 0.87, 0.90);
+        vec3 gravel = vec3(0.42, 0.40, 0.38);
+        vec3 log    = vec3(0.36, 0.24, 0.14);
+        vec3 leaves = vec3(0.20, 0.48, 0.16);
 
-        if (y < 8.0) {
-          color = stone;
-        } else if (y < 11.0) {
-          t = (y - 8.0) / 3.0;
-          color = mix(stone, dirt, t);
-        } else if (y < 14.0) {
-          t = (y - 11.0) / 3.0;
-          color = mix(dirt, grass, t);
-        } else if (y < 20.0) {
-          color = grass;
-        } else {
-          t = clamp((y - 20.0) / 4.0, 0.0, 1.0);
-          color = mix(grass, snow, t);
+        vec3 color;
+        if (bid == 1) color = stone;
+        else if (bid == 2) color = dirt;
+        else if (bid == 3) {
+          // Grass: green top, dirt sides
+          float isTop = step(0.9, dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)));
+          color = mix(dirt, grass, isTop);
         }
+        else if (bid == 4) color = sand;
+        else if (bid == 5) color = water;
+        else if (bid == 6) color = snow;
+        else if (bid == 7) color = gravel;
+        else if (bid == 8) color = log;
+        else if (bid == 9) color = leaves;
+        else color = vec3(1.0, 0.0, 1.0); // debug magenta
 
+        // Subtle per-block variation so it doesn't look flat
+        float variation = hash(floor(vWorldPos.xz)) * 0.06 - 0.03;
+        color += variation;
+
+        // Lighting
         vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
         float ndotl = dot(normalize(vNormal), lightDir);
         float diffuse = 0.35 + 0.65 * max(ndotl, 0.0);
@@ -397,6 +594,12 @@ function createTerrainMaterial() {
         float skyFill = 0.08 * max(dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)), 0.0);
 
         color *= (diffuse * aoFactor + skyFill);
+
+        // Water gets slight translucency vibe via desaturation
+        if (bid == 5) {
+          color *= 0.85;
+          color += vec3(0.02, 0.04, 0.08);
+        }
 
         // Fog centered on camera target
         float dist = length(vWorldPos.xz - uCameraTarget.xz);
@@ -421,12 +624,14 @@ function buildGeometry(meshResult) {
   const positions = meshResult.positions();
   const normals = meshResult.normals();
   const aoData = meshResult.ao();
+  const blockIds = meshResult.block_ids();
   const indices = meshResult.indices();
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute('ao', new THREE.BufferAttribute(aoData, 1));
+  geometry.setAttribute('blockId', new THREE.BufferAttribute(blockIds, 1));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeBoundingBox();
 
