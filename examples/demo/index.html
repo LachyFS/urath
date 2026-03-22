@@ -236,6 +236,146 @@
   body.ready .tech-badge {
     transition-delay: 0.7s;
   }
+
+  /* ── Block toolbar ──────────────────────────────── */
+
+  .block-toolbar {
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 2px;
+  }
+
+  body.ready .block-toolbar {
+    transition-delay: 0.6s;
+  }
+
+  .block-slot {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+    transition: border-color 0.15s ease;
+  }
+
+  .block-slot.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 6px rgba(127, 204, 129, 0.25);
+  }
+
+  .block-slot .swatch {
+    position: absolute;
+    inset: 4px;
+    border-radius: 2px;
+  }
+
+  .block-slot .key-hint {
+    position: absolute;
+    bottom: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 8px;
+    color: var(--text-dim);
+    font-family: var(--mono);
+  }
+
+  /* ── Brush toolbar ──────────────────────────────── */
+
+  .brush-toolbar {
+    top: 28px;
+    right: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-end;
+  }
+
+  body.ready .brush-toolbar {
+    transition-delay: 0.6s;
+  }
+
+  .brush-row {
+    display: flex;
+    gap: 3px;
+  }
+
+  .brush-btn {
+    font-family: var(--mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+  }
+
+  .brush-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: rgba(127, 204, 129, 0.04);
+  }
+
+  .radius-ctrl {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--text-secondary);
+  }
+
+  /* ── Crosshair ───────────────────────────────────── */
+
+  .crosshair {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 20;
+    pointer-events: none;
+    opacity: 0.5;
+  }
+
+  .crosshair::before, .crosshair::after {
+    content: '';
+    position: absolute;
+    background: #fff;
+  }
+
+  .crosshair::before {
+    width: 12px; height: 1px;
+    top: 0; left: -6px;
+  }
+
+  .crosshair::after {
+    width: 1px; height: 12px;
+    top: -6px; left: 0;
+  }
+
+  .radius-ctrl button {
+    width: 20px;
+    height: 20px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-secondary);
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
 </style>
 
 <script type="importmap">
@@ -255,11 +395,12 @@
 </div>
 
 <div id="scene-container"></div>
+<div class="crosshair"></div>
 
 <div class="overlay header">
   <h1>urath</h1>
   <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
-  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">WASD move · Space/Shift up/down · Mouse orbit</p>
+  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · ESC menu</p>
 </div>
 
 <div class="overlay stats-panel">
@@ -292,9 +433,36 @@
   </div>
 </div>
 
+<div class="overlay brush-toolbar">
+  <div class="brush-row">
+    <button class="brush-btn active" data-brush="single">Single <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
+    <button class="brush-btn" data-brush="sphere">Sphere <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
+    <button class="brush-btn" data-brush="line">Disc <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
+  </div>
+  <div class="radius-ctrl" id="radius-ctrl" style="display:none">
+    <span class="key-hint" style="position:static">[</span>
+    <button id="radius-dec">-</button>
+    <span id="radius-val">2</span>
+    <button id="radius-inc">+</button>
+    <span class="key-hint" style="position:static">]</span>
+  </div>
+</div>
+
+<div class="overlay block-toolbar" id="block-toolbar">
+  <div class="block-slot active" data-block="1"><div class="swatch" style="background:#575458"></div><span class="key-hint">1</span></div>
+  <div class="block-slot" data-block="2"><div class="swatch" style="background:#735239"></div><span class="key-hint">2</span></div>
+  <div class="block-slot" data-block="3"><div class="swatch" style="background:#4d8c38"></div><span class="key-hint">3</span></div>
+  <div class="block-slot" data-block="4"><div class="swatch" style="background:#c2b380"></div><span class="key-hint">4</span></div>
+  <div class="block-slot" data-block="5"><div class="swatch" style="background:#2e598c"></div><span class="key-hint">5</span></div>
+  <div class="block-slot" data-block="6"><div class="swatch" style="background:#d9dee6"></div><span class="key-hint">6</span></div>
+  <div class="block-slot" data-block="7"><div class="swatch" style="background:#6b6661"></div><span class="key-hint">7</span></div>
+  <div class="block-slot" data-block="8"><div class="swatch" style="background:#5c3d24"></div><span class="key-hint">8</span></div>
+  <div class="block-slot" data-block="9"><div class="swatch" style="background:#337a29"></div><span class="key-hint">9</span></div>
+</div>
+
 <script type="module">
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher } from './pkg/urath_wasm.js';
 
 // Face direction constants matching Rust Face enum
@@ -481,8 +649,8 @@ function generateChunkData(cx, cz) {
 
       if (height <= SEA_LEVEL + 2) continue; // no trees on beaches / underwater
 
-      const treeDensity = biome === 'forest' ? 0.93 : biome === 'plains' ? 0.985 : 1.0;
-      if (_hash(wx * 7 + 1337, wz * 13 + 7331) > treeDensity) continue;
+      const treeChance = biome === 'forest' ? 0.01 : biome === 'plains' ? 0.002 : 0.0;
+      if (_hash(wx * 7 + 1337, wz * 13 + 7331) > treeChance) continue;
 
       // Don't place trees where surface isn't grass
       if (chunk.get_block(lx, height - 1, lz) !== BLOCK_GRASS) continue;
@@ -648,17 +816,10 @@ function createScene(container) {
 
   const scene = new THREE.Scene();
 
-  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.5, 500);
-  camera.position.set(55, 45, 60);
+  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
+  camera.position.set(16, 24, 16);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 10, 0);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.minDistance = 15;
-  controls.maxDistance = 200;
-  controls.maxPolarAngle = Math.PI * 0.48;
-  controls.update();
+  const controls = new PointerLockControls(camera, renderer.domElement);
 
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
@@ -669,13 +830,12 @@ function createScene(container) {
   return { renderer, scene, camera, controls };
 }
 
-// ── Keyboard movement ──────────────────────────────
+// ── Keyboard movement (first person) ────────────────
 class KeyboardMover {
-  constructor(controls, camera) {
-    this.controls = controls;
+  constructor(camera) {
     this.camera = camera;
     this.keys = {};
-    this.speed = 80; // world units per second
+    this.speed = 20; // world units per second
 
     window.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
@@ -686,36 +846,27 @@ class KeyboardMover {
   }
 
   update(dt) {
-    if (dt <= 0 || dt > 0.1) return; // skip large gaps
+    if (dt <= 0 || dt > 0.1) return;
 
     const move = new THREE.Vector3();
 
-    // Get camera's forward direction projected onto XZ plane
     const forward = new THREE.Vector3();
     this.camera.getWorldDirection(forward);
     forward.y = 0;
     forward.normalize();
 
-    // Right vector
     const right = new THREE.Vector3();
     right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
 
-    // WASD / Arrow keys for horizontal movement
     if (this.keys['KeyW'] || this.keys['ArrowUp'])    move.add(forward);
     if (this.keys['KeyS'] || this.keys['ArrowDown'])   move.sub(forward);
     if (this.keys['KeyD'] || this.keys['ArrowRight'])  move.add(right);
     if (this.keys['KeyA'] || this.keys['ArrowLeft'])   move.sub(right);
-
-    // Space / Shift for vertical
     if (this.keys['Space'])    move.y += 1;
     if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) move.y -= 1;
 
     if (move.lengthSq() === 0) return;
-
     move.normalize().multiplyScalar(this.speed * dt);
-
-    // Move both target and camera together
-    this.controls.target.add(move);
     this.camera.position.add(move);
   }
 }
@@ -860,6 +1011,158 @@ class ChunkManager {
   }
 }
 
+// ── Brush modes ───────────────────────────────────
+// Each brush returns an array of {x,y,z} offsets from the center block.
+const BRUSH_SINGLE = 'single';
+const BRUSH_SPHERE = 'sphere';
+const BRUSH_LINE   = 'line';
+
+let currentBrush = BRUSH_SINGLE;
+let brushRadius = 2;
+
+function getBrushOffsets(brush, radius, normal) {
+  const offsets = [];
+  if (brush === BRUSH_SINGLE) {
+    offsets.push({ x: 0, y: 0, z: 0 });
+  } else if (brush === BRUSH_SPHERE) {
+    const r = radius;
+    const r2 = r * r;
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if (dx * dx + dy * dy + dz * dz <= r2) {
+            offsets.push({ x: dx, y: dy, z: dz });
+          }
+        }
+      }
+    }
+  } else if (brush === BRUSH_LINE) {
+    // Extrude a flat disc along the face normal
+    const r = radius;
+    const r2 = r * r;
+    // Determine which axes the disc covers (perpendicular to normal)
+    const nx = Math.abs(normal.x) > 0.5;
+    const ny = Math.abs(normal.y) > 0.5;
+    const nz = Math.abs(normal.z) > 0.5;
+    for (let da = -r; da <= r; da++) {
+      for (let db = -r; db <= r; db++) {
+        if (da * da + db * db > r2) continue;
+        if (nx)      offsets.push({ x: 0, y: da, z: db });
+        else if (ny) offsets.push({ x: da, y: 0, z: db });
+        else         offsets.push({ x: da, y: db, z: 0 });
+      }
+    }
+  }
+  return offsets;
+}
+
+// ── Voxel editing ─────────────────────────────────
+function worldToChunkLocal(wx, wy, wz) {
+  const cx = Math.floor(wx / CHUNK_SIZE);
+  const cz = Math.floor(wz / CHUNK_SIZE);
+  const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+  const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+  return { cx, cz, lx, ly: wy, lz };
+}
+
+// Batch edit: group blocks by chunk, use set_blocks, remesh each chunk once.
+function batchEditBlocks(chunkManager, edits) {
+  // Group edits by chunk key
+  const byChunk = new Map(); // key -> { chunk, edits: [x,y,z,id,...], boundaries: Set }
+  for (const { x: wx, y: wy, z: wz, blockId } of edits) {
+    if (wy < 0 || wy >= CHUNK_SIZE) continue;
+    const { cx, cz, lx, ly, lz } = worldToChunkLocal(wx, wy, wz);
+    const k = chunkManager.key(cx, cz);
+    const chunk = chunkManager.chunkData.get(k);
+    if (!chunk) continue;
+
+    if (!byChunk.has(k)) {
+      byChunk.set(k, { cx, cz, chunk, edits: [], boundaries: new Set() });
+    }
+    const entry = byChunk.get(k);
+    entry.edits.push(lx, ly, lz, blockId);
+
+    // Track which boundary neighbors need remeshing
+    if (lx === 0)              entry.boundaries.add(chunkManager.key(cx - 1, cz));
+    if (lx === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx + 1, cz));
+    if (lz === 0)              entry.boundaries.add(chunkManager.key(cx, cz - 1));
+    if (lz === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cz + 1));
+  }
+
+  // Apply edits and collect all chunks that need remeshing
+  const remeshSet = new Set();
+  for (const [k, { cx, cz, chunk, edits, boundaries }] of byChunk) {
+    chunk.set_blocks(new Uint32Array(edits));
+    remeshSet.add(k);
+    for (const bk of boundaries) remeshSet.add(bk);
+  }
+
+  // Remesh each affected chunk exactly once
+  for (const k of remeshSet) {
+    if (!chunkManager.chunkData.has(k)) continue;
+    const [cx, cz] = k.split(',').map(Number);
+    chunkManager._meshChunk(cx, cz);
+  }
+
+  updateStats(chunkManager.chunkMeshes.size, chunkManager.totalVerts, chunkManager.totalTris, chunkManager.pending.size);
+}
+
+// Single-block edit (convenience wrapper)
+function editBlock(chunkManager, wx, wy, wz, blockId) {
+  batchEditBlocks(chunkManager, [{ x: wx, y: wy, z: wz, blockId }]);
+}
+
+// Brush edit: expand a center point into brush offsets, then batch edit.
+function brushEdit(chunkManager, center, blockId, normal) {
+  const offsets = getBrushOffsets(currentBrush, brushRadius, normal);
+  const edits = offsets.map(o => ({
+    x: center.x + o.x, y: center.y + o.y, z: center.z + o.z, blockId,
+  }));
+  batchEditBlocks(chunkManager, edits);
+}
+
+function getTargetBlock(raycaster, mouse, camera, chunkManager) {
+  raycaster.setFromCamera(mouse, camera);
+  const meshes = Array.from(chunkManager.chunkMeshes.values());
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (hits.length === 0) return null;
+
+  const hit = hits[0];
+  const p = hit.point;
+  const n = hit.face.normal;
+
+  // Block that owns the hit face (nudge inward)
+  const breakX = Math.floor(p.x - n.x * 0.01);
+  const breakY = Math.floor(p.y - n.y * 0.01);
+  const breakZ = Math.floor(p.z - n.z * 0.01);
+
+  // Adjacent empty block (nudge outward)
+  const placeX = Math.floor(p.x + n.x * 0.01);
+  const placeY = Math.floor(p.y + n.y * 0.01);
+  const placeZ = Math.floor(p.z + n.z * 0.01);
+
+  return {
+    breakPos: { x: breakX, y: breakY, z: breakZ },
+    placePos: { x: placeX, y: placeY, z: placeZ },
+    normal: n,
+  };
+}
+
+function updateBlockToolbar(activeId) {
+  document.querySelectorAll('.block-slot').forEach(el => {
+    el.classList.toggle('active', Number(el.dataset.block) === activeId);
+  });
+}
+
+function updateBrushUI() {
+  document.querySelectorAll('.brush-btn').forEach(el => {
+    el.classList.toggle('active', el.dataset.brush === currentBrush);
+  });
+  document.getElementById('radius-val').textContent = brushRadius;
+  const radCtrl = document.getElementById('radius-ctrl');
+  radCtrl.style.display = currentBrush === BRUSH_SINGLE ? 'none' : 'flex';
+}
+
 // ── Main ───────────────────────────────────────────
 async function main() {
   await init();
@@ -870,7 +1173,118 @@ async function main() {
   const material = createTerrainMaterial();
   const mesher = new WasmGreedyMesher(CHUNK_SIZE);
   const chunkManager = new ChunkManager(scene, material, mesher);
-  const mover = new KeyboardMover(controls, camera);
+  const mover = new KeyboardMover(camera);
+
+  // ── Editing state ──
+  let selectedBlockId = BLOCK_STONE;
+  const raycaster = new THREE.Raycaster();
+  raycaster.far = 100;
+  // First person: raycast always from screen center
+  const screenCenter = new THREE.Vector2(0, 0);
+
+  // Highlight preview — wireframe cubes matching brush shape
+  const hlBoxGeo = new THREE.BoxGeometry(1.01, 1.01, 1.01);
+  const hlEdgesGeo = new THREE.EdgesGeometry(hlBoxGeo);
+  const hlMat = new THREE.LineBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.35, depthTest: false,
+  });
+  let hlGroup = new THREE.Group();
+  hlGroup.renderOrder = 999;
+  hlGroup.visible = false;
+  scene.add(hlGroup);
+  let hlLastRadius = -1;
+  let hlLastBrush = '';
+  let hlLastNormal = '';
+
+  function rebuildHighlight(normal) {
+    const nKey = normal ? `${Math.round(normal.x)},${Math.round(normal.y)},${Math.round(normal.z)}` : '0,1,0';
+    if (hlLastBrush === currentBrush && hlLastRadius === brushRadius && hlLastNormal === nKey) return;
+    hlLastBrush = currentBrush;
+    hlLastRadius = brushRadius;
+    hlLastNormal = nKey;
+
+    while (hlGroup.children.length) {
+      hlGroup.remove(hlGroup.children[0]);
+    }
+
+    const n = normal || { x: 0, y: 1, z: 0 };
+    const offsets = getBrushOffsets(currentBrush, brushRadius, n);
+    for (const o of offsets) {
+      const line = new THREE.LineSegments(hlEdgesGeo, hlMat);
+      line.position.set(o.x, o.y, o.z);
+      hlGroup.add(line);
+    }
+  }
+  rebuildHighlight(null);
+
+  // ── Pointer lock ──
+  // Click canvas to lock, ESC to unlock
+  renderer.domElement.addEventListener('click', () => {
+    if (!controls.isLocked) controls.lock();
+  });
+
+  // Left click = break, right click = place (while locked)
+  document.addEventListener('mousedown', (e) => {
+    if (!controls.isLocked) return;
+    const target = getTargetBlock(raycaster, screenCenter, camera, chunkManager);
+    if (!target) return;
+
+    if (e.button === 0) {
+      brushEdit(chunkManager, target.breakPos, BLOCK_AIR, target.normal);
+    } else if (e.button === 2) {
+      brushEdit(chunkManager, target.placePos, selectedBlockId, target.normal);
+    }
+  });
+
+  document.addEventListener('contextmenu', (e) => {
+    if (controls.isLocked) e.preventDefault();
+  });
+
+  // Block selection (number keys 1-9), brush keys (B cycle, [ ] radius)
+  window.addEventListener('keydown', (e) => {
+    const num = parseInt(e.key);
+    if (num >= 1 && num <= 9) {
+      selectedBlockId = num;
+      updateBlockToolbar(num);
+    } else if (e.code === 'KeyB') {
+      const modes = [BRUSH_SINGLE, BRUSH_SPHERE, BRUSH_LINE];
+      currentBrush = modes[(modes.indexOf(currentBrush) + 1) % modes.length];
+      updateBrushUI();
+    } else if (e.key === '[') {
+      brushRadius = Math.max(1, brushRadius - 1);
+      updateBrushUI();
+    } else if (e.key === ']') {
+      brushRadius = Math.min(6, brushRadius + 1);
+      updateBrushUI();
+    }
+  });
+
+  // Toolbar click selection (works when unlocked)
+  document.querySelectorAll('.block-slot').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectedBlockId = Number(el.dataset.block);
+      updateBlockToolbar(selectedBlockId);
+    });
+  });
+
+  document.querySelectorAll('.brush-btn').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      currentBrush = el.dataset.brush;
+      updateBrushUI();
+    });
+  });
+  document.getElementById('radius-dec').addEventListener('click', (e) => {
+    e.stopPropagation();
+    brushRadius = Math.max(1, brushRadius - 1);
+    updateBrushUI();
+  });
+  document.getElementById('radius-inc').addEventListener('click', (e) => {
+    e.stopPropagation();
+    brushRadius = Math.min(6, brushRadius + 1);
+    updateBrushUI();
+  });
 
   // Hide loading, reveal UI
   document.getElementById('loading').classList.add('hidden');
@@ -888,23 +1302,30 @@ async function main() {
     lastTime = now;
 
     mover.update(dt);
-    controls.update();
 
-    // Determine camera chunk position from orbit target
-    const target = controls.target;
-    const cameraCX = Math.floor(target.x / CHUNK_SIZE);
-    const cameraCZ = Math.floor(target.z / CHUNK_SIZE);
+    // Determine camera chunk position from camera pos
+    const camPos = camera.position;
+    const cameraCX = Math.floor(camPos.x / CHUNK_SIZE);
+    const cameraCZ = Math.floor(camPos.z / CHUNK_SIZE);
 
-    // Update fog center
-    material.uniforms.uCameraTarget.value.copy(target);
+    // Update fog center to camera position
+    material.uniforms.uCameraTarget.value.copy(camPos);
 
-    // Always tick the manager (processes pending queue)
-    // but only re-evaluate needed set when camera chunk changes
     if (cameraCX !== lastCameraCX || cameraCZ !== lastCameraCZ || chunkManager.pending.size > 0) {
       chunkManager.update(cameraCX, cameraCZ);
       lastCameraCX = cameraCX;
       lastCameraCZ = cameraCZ;
       updateStats(chunkManager.chunkMeshes.size, chunkManager.totalVerts, chunkManager.totalTris, chunkManager.pending.size);
+    }
+
+    // Hover highlight (always from screen center in first person)
+    const ht = getTargetBlock(raycaster, screenCenter, camera, chunkManager);
+    if (ht) {
+      rebuildHighlight(ht.normal);
+      hlGroup.position.set(ht.breakPos.x + 0.5, ht.breakPos.y + 0.5, ht.breakPos.z + 0.5);
+      hlGroup.visible = true;
+    } else {
+      hlGroup.visible = false;
     }
 
     renderer.render(scene, camera);

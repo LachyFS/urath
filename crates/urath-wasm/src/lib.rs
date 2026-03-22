@@ -39,6 +39,15 @@ impl WasmChunk {
         self.inner.size()
     }
 
+    /// Set multiple blocks in one call.
+    ///
+    /// `edits` is a flat Uint32Array where every 4 consecutive values form
+    /// one edit: `[x, y, z, block_id, x, y, z, block_id, ...]`.
+    /// Out-of-bounds entries are silently skipped. Returns the count of blocks written.
+    pub fn set_blocks(&mut self, edits: &[u32]) -> u32 {
+        self.inner.set_blocks(edits)
+    }
+
     /// Fill a column from y=0 to y=height-1 with a block ID.
     pub fn fill_column(&mut self, x: usize, z: usize, height: usize, block_id: u16) {
         let max = height.min(self.inner.size());

@@ -157,6 +157,30 @@ impl Chunk {
         self.blocks[idx] = block_id;
     }
 
+    /// Set multiple blocks at once from a flat slice of (x, y, z, block_id) tuples.
+    ///
+    /// `edits` must have length divisible by 4. Each group of 4 values is
+    /// interpreted as `[x, y, z, block_id]`. Out-of-bounds entries are silently
+    /// skipped. Returns the number of blocks actually written.
+    pub fn set_blocks(&mut self, edits: &[u32]) -> u32 {
+        let s = self.size;
+        let mut count = 0u32;
+        let mut i = 0;
+        while i + 3 < edits.len() {
+            let x = edits[i] as usize;
+            let y = edits[i + 1] as usize;
+            let z = edits[i + 2] as usize;
+            let block_id = edits[i + 3] as u16;
+            i += 4;
+            if x < s && y < s && z < s {
+                let idx = self.index(x, y, z);
+                self.blocks[idx] = block_id;
+                count += 1;
+            }
+        }
+        count
+    }
+
     /// Check if (x, y, z) is air (block ID 0).
     #[inline]
     pub fn is_air(&self, x: usize, y: usize, z: usize) -> bool {
@@ -290,6 +314,24 @@ mod tests {
         assert_eq!(chunk.get(5, 10, 15), 42);
         assert!(!chunk.is_air(5, 10, 15));
         assert!(chunk.is_air(0, 0, 0));
+    }
+
+    #[test]
+    fn set_blocks_batch() {
+        let mut chunk = Chunk::new_default();
+        // 3 edits packed as [x, y, z, block_id, ...]
+        let edits: Vec<u32> = vec![
+            0, 0, 0, 1,
+            5, 10, 15, 42,
+            31, 31, 31, 7,
+            // out of bounds — should be skipped
+            32, 0, 0, 99,
+        ];
+        let written = chunk.set_blocks(&edits);
+        assert_eq!(written, 3);
+        assert_eq!(chunk.get(0, 0, 0), 1);
+        assert_eq!(chunk.get(5, 10, 15), 42);
+        assert_eq!(chunk.get(31, 31, 31), 7);
     }
 
     #[test]
