@@ -8,5 +8,5 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-urath-core = { path = "crates/urath-core" }
+urath = { path = "crates/urath-core", version = "0.1.0" }
 thiserror = "2"

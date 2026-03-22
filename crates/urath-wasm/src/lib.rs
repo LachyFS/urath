@@ -1,11 +1,11 @@
 use wasm_bindgen::prelude::*;
 
-use urath_core::{ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher};
+use urath::{ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher};
 
 /// WASM-exposed chunk that holds voxel data.
 #[wasm_bindgen]
 pub struct WasmChunk {
-    inner: urath_core::Chunk,
+    inner: urath::Chunk,
 }
 
 #[wasm_bindgen]
@@ -13,14 +13,14 @@ impl WasmChunk {
     /// Create a new chunk filled with air.
     #[wasm_bindgen(constructor)]
     pub fn new(size: usize) -> Result<WasmChunk, JsError> {
-        let inner = urath_core::Chunk::new(size).map_err(|e| JsError::new(&e.to_string()))?;
+        let inner = urath::Chunk::new(size).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Self { inner })
     }
 
     /// Create a default 32x32x32 chunk.
     pub fn new_default() -> WasmChunk {
         Self {
-            inner: urath_core::Chunk::new_default(),
+            inner: urath::Chunk::new_default(),
         }
     }
 
