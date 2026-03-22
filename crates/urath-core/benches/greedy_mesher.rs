@@ -1,5 +1,5 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use voxel_mesh_core::{Chunk, ChunkNeighbors, GreedyMesher, MeshOutput, Mesher};
+use urath_core::{Chunk, ChunkNeighbors, GreedyMesher, MeshOutput, Mesher};
 
 fn bench_empty_chunk(c: &mut Criterion) {
     let chunk = Chunk::new_default();

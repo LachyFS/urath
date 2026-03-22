@@ -1,22 +1,22 @@
 # CLAUDE.md
 
-## Project: voxel-mesh
+## Project: urath
 
 Rust/WASM voxel meshing library for Three.js. Monorepo with Rust workspace + TypeScript npm package.
 
 ### Build Commands
 
-- `cd crates/voxel-mesh-core && cargo test` — run Rust unit tests
-- `cd crates/voxel-mesh-core && cargo bench` — run Criterion benchmarks
-- `cd crates/voxel-mesh-wasm && wasm-pack build --target web --out-dir ../../packages/voxel-mesh/wasm` — build WASM
-- `cd packages/voxel-mesh && npm run build` — build TypeScript package
-- `cd packages/voxel-mesh && npm run typecheck` — type check only
+- `cd crates/urath-core && cargo test` — run Rust unit tests
+- `cd crates/urath-core && cargo bench` — run Criterion benchmarks
+- `cd crates/urath-wasm && wasm-pack build --target web --out-dir ../../packages/urath/wasm` — build WASM
+- `cd packages/urath && npm run build` — build TypeScript package
+- `cd packages/urath && npm run typecheck` — type check only
 
 ### Architecture
 
-- `crates/voxel-mesh-core/` — Pure Rust. Meshing algorithms, chunk data structures, output buffers. No WASM deps here.
-- `crates/voxel-mesh-wasm/` — Thin wasm-bindgen wrapper over core. Handles JS ↔ WASM buffer marshalling.
-- `packages/voxel-mesh/` — TypeScript npm package. Wraps WASM, adds Three.js integration, worker pool, materials.
+- `crates/urath-core/` — Pure Rust. Meshing algorithms, chunk data structures, output buffers. No WASM deps here.
+- `crates/urath-wasm/` — Thin wasm-bindgen wrapper over core. Handles JS ↔ WASM buffer marshalling.
+- `packages/urath/` — TypeScript npm package. Wraps WASM, adds Three.js integration, worker pool, materials.
 
 ### Conventions
 

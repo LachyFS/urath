@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>voxel-mesh</title>
+<title>urath</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
 
@@ -257,7 +257,7 @@
 <div id="scene-container"></div>
 
 <div class="overlay header">
-  <h1>voxel<span>-</span>mesh</h1>
+  <h1>urath</h1>
   <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
   <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">WASD move · Space/Shift up/down · Mouse orbit</p>
 </div>
@@ -295,7 +295,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher } from './pkg/voxel_mesh_wasm.js';
+import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher } from './pkg/urath_wasm.js';
 
 // Face direction constants matching Rust Face enum
 const FACE_POS_X = 0;
