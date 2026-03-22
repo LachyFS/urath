@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>voxel-mesh</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #060608;
+    --surface: rgba(255, 255, 255, 0.03);
+    --border: rgba(255, 255, 255, 0.06);
+    --text-primary: rgba(255, 255, 255, 0.87);
+    --text-secondary: rgba(255, 255, 255, 0.4);
+    --text-dim: rgba(255, 255, 255, 0.18);
+    --accent: #7fcc81;
+    --accent-dim: rgba(127, 204, 129, 0.15);
+    --mono: 'JetBrains Mono', monospace;
+    --sans: 'DM Sans', sans-serif;
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text-primary);
+    font-family: var(--mono);
+  }
+
+  canvas { display: block; }
+
+  #scene-container {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+  }
+
+  /* ── Overlay UI ────────────────────────────────── */
+
+  .overlay {
+    position: fixed;
+    z-index: 10;
+    pointer-events: none;
+  }
+
+  .overlay * {
+    pointer-events: auto;
+  }
+
+  /* Top-left: title block */
+  .header {
+    top: 28px;
+    left: 32px;
+  }
+
+  .header h1 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    line-height: 1;
+    margin-bottom: 8px;
+  }
+
+  .header h1 span {
+    color: var(--accent);
+  }
+
+  .header .tagline {
+    font-family: var(--sans);
+    font-weight: 300;
+    font-style: italic;
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    max-width: 280px;
+  }
+
+  /* Bottom-left: stats panel */
+  .stats-panel {
+    bottom: 28px;
+    left: 32px;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2px;
+  }
+
+  .stat-cell {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    min-width: 120px;
+  }
+
+  .stat-cell:first-child { border-radius: 6px 0 0 0; }
+  .stat-cell:nth-child(2) { border-radius: 0 6px 0 0; }
+  .stat-cell:nth-child(3) { border-radius: 0 0 0 6px; }
+  .stat-cell:last-child { border-radius: 0 0 6px 0; }
+
+  .stat-label {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+
+  .stat-value {
+    font-size: 16px;
+    font-weight: 300;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat-value .unit {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-left: 2px;
+  }
+
+  /* Bottom-right: tech badge */
+  .tech-badge {
+    bottom: 28px;
+    right: 32px;
+    text-align: right;
+  }
+
+  .tech-badge .engine {
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+
+  .tech-stack {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .tech-tag {
+    font-size: 10px;
+    font-weight: 400;
+    padding: 3px 8px;
+    border-radius: 3px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+  }
+
+  .tech-tag.highlight {
+    border-color: var(--accent-dim);
+    color: var(--accent);
+    background: rgba(127, 204, 129, 0.04);
+  }
+
+  /* ── Loading state ─────────────────────────────── */
+
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 16px;
+    transition: opacity 0.6s ease, visibility 0.6s ease;
+  }
+
+  .loading-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .loading-text {
+    font-size: 11px;
+    font-weight: 400;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+  }
+
+  .loading-bar {
+    width: 120px;
+    height: 1px;
+    background: var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .loading-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: var(--accent);
+    animation: load-sweep 1.2s ease-in-out infinite;
+    transform-origin: left;
+  }
+
+  @keyframes load-sweep {
+    0%   { transform: scaleX(0); translate: 0; }
+    50%  { transform: scaleX(0.6); translate: 0; }
+    100% { transform: scaleX(0); translate: 120px; }
+  }
+
+  /* ── Fade-in for UI ────────────────────────────── */
+
+  .overlay {
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.8s ease 0.3s, transform 0.8s ease 0.3s;
+  }
+
+  body.ready .overlay {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  body.ready .stats-panel {
+    transition-delay: 0.5s;
+  }
+
+  body.ready .tech-badge {
+    transition-delay: 0.7s;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@0.172.0",
+    "three/addons/": "https://esm.sh/three@0.172.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<div class="loading-overlay" id="loading">
+  <div class="loading-text">Initializing WASM</div>
+  <div class="loading-bar"></div>
+</div>
+
+<div id="scene-container"></div>
+
+<div class="overlay header">
+  <h1>voxel<span>-</span>mesh</h1>
+  <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
+  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">WASD move · Space/Shift up/down · Mouse orbit</p>
+</div>
+
+<div class="overlay stats-panel">
+  <div class="stats-grid">
+    <div class="stat-cell">
+      <div class="stat-label">Chunks</div>
+      <div class="stat-value" id="stat-chunks">—</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Vertices</div>
+      <div class="stat-value" id="stat-verts">—</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Triangles</div>
+      <div class="stat-value" id="stat-tris">—</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Pending</div>
+      <div class="stat-value" id="stat-time">—</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay tech-badge">
+  <div class="engine">Engine</div>
+  <div class="tech-stack">
+    <span class="tech-tag highlight">Rust / WASM</span>
+    <span class="tech-tag">Three.js</span>
+    <span class="tech-tag">Greedy Mesher</span>
+  </div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher } from './pkg/voxel_mesh_wasm.js';
+
+// Face direction constants matching Rust Face enum
+const FACE_POS_X = 0;
+const FACE_NEG_X = 1;
+const FACE_POS_Z = 4;
+const FACE_NEG_Z = 5;
+
+// ── Constants ──────────────────────────────────────
+const CHUNK_SIZE = 32;
+const RENDER_DISTANCE = 6;       // chunks from camera center
+const UNLOAD_DISTANCE = 8;       // chunks before disposal
+const CHUNKS_PER_FRAME = 3;      // max chunks to gen/mesh per frame
+
+// ── Terrain generation ─────────────────────────────
+function terrainHeight(worldX, worldZ) {
+  return Math.max(1, Math.min(CHUNK_SIZE - 1,
+    12
+    + Math.floor(
+        8 * Math.sin(worldX * 0.08) * Math.cos(worldZ * 0.06)
+      + 4 * Math.sin(worldX * 0.15 + worldZ * 0.12)
+      + 2 * Math.sin(worldX * 0.3 - worldZ * 0.2)
+    )
+  ));
+}
+
+function generateChunkData(cx, cz) {
+  const chunk = WasmChunk.new_default();
+  const offsetX = cx * CHUNK_SIZE;
+  const offsetZ = cz * CHUNK_SIZE;
+
+  for (let lz = 0; lz < CHUNK_SIZE; lz++) {
+    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const h = terrainHeight(offsetX + lx, offsetZ + lz);
+      for (let y = 0; y < h; y++) {
+        let blockId;
+        if (y < h - 3) blockId = 1;
+        else if (y < h - 1) blockId = 2;
+        else blockId = 3;
+        chunk.set_block(lx, y, lz, blockId);
+      }
+    }
+  }
+  return chunk;
+}
+
+// ── Shader material ────────────────────────────────
+function createTerrainMaterial() {
+  return new THREE.ShaderMaterial({
+    vertexShader: /* glsl */ `
+      attribute float ao;
+      varying float vAo;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+
+      void main() {
+        vAo = ao;
+        vNormal = normalMatrix * normal;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldPos = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }
+    `,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uCameraTarget;
+      varying float vAo;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+
+      void main() {
+        float y = vWorldPos.y;
+        vec3 stone = vec3(0.32, 0.31, 0.33);
+        vec3 dirt  = vec3(0.45, 0.32, 0.22);
+        vec3 grass = vec3(0.30, 0.52, 0.26);
+        vec3 snow  = vec3(0.78, 0.80, 0.82);
+
+        vec3 color = stone;
+        float t;
+
+        if (y < 8.0) {
+          color = stone;
+        } else if (y < 11.0) {
+          t = (y - 8.0) / 3.0;
+          color = mix(stone, dirt, t);
+        } else if (y < 14.0) {
+          t = (y - 11.0) / 3.0;
+          color = mix(dirt, grass, t);
+        } else if (y < 20.0) {
+          color = grass;
+        } else {
+          t = clamp((y - 20.0) / 4.0, 0.0, 1.0);
+          color = mix(grass, snow, t);
+        }
+
+        vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
+        float ndotl = dot(normalize(vNormal), lightDir);
+        float diffuse = 0.35 + 0.65 * max(ndotl, 0.0);
+
+        float aoFactor = 0.55 + 0.45 * vAo;
+        float skyFill = 0.08 * max(dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)), 0.0);
+
+        color *= (diffuse * aoFactor + skyFill);
+
+        // Fog centered on camera target
+        float dist = length(vWorldPos.xz - uCameraTarget.xz);
+        float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.5).toFixed(1)};
+        float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.85).toFixed(1)};
+        float fog = 1.0 - smoothstep(fogStart, fogEnd, dist);
+        vec3 fogColor = vec3(0.024, 0.024, 0.03);
+        color = mix(fogColor, color, fog);
+
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
+    uniforms: {
+      uCameraTarget: { value: new THREE.Vector3() },
+    },
+    side: THREE.FrontSide,
+  });
+}
+
+// ── Build geometry from mesh result ────────────────
+function buildGeometry(meshResult) {
+  const positions = meshResult.positions();
+  const normals = meshResult.normals();
+  const aoData = meshResult.ao();
+  const indices = meshResult.indices();
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute('ao', new THREE.BufferAttribute(aoData, 1));
+  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+  geometry.computeBoundingBox();
+
+  return geometry;
+}
+
+// ── Scene setup ────────────────────────────────────
+function createScene(container) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x060608);
+  container.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+
+  const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.5, 500);
+  camera.position.set(55, 45, 60);
+
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.target.set(0, 10, 0);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.06;
+  controls.minDistance = 15;
+  controls.maxDistance = 200;
+  controls.maxPolarAngle = Math.PI * 0.48;
+  controls.update();
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  return { renderer, scene, camera, controls };
+}
+
+// ── Keyboard movement ──────────────────────────────
+class KeyboardMover {
+  constructor(controls, camera) {
+    this.controls = controls;
+    this.camera = camera;
+    this.keys = {};
+    this.speed = 80; // world units per second
+
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.code] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+      this.keys[e.code] = false;
+    });
+  }
+
+  update(dt) {
+    if (dt <= 0 || dt > 0.1) return; // skip large gaps
+
+    const move = new THREE.Vector3();
+
+    // Get camera's forward direction projected onto XZ plane
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    // Right vector
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+    // WASD / Arrow keys for horizontal movement
+    if (this.keys['KeyW'] || this.keys['ArrowUp'])    move.add(forward);
+    if (this.keys['KeyS'] || this.keys['ArrowDown'])   move.sub(forward);
+    if (this.keys['KeyD'] || this.keys['ArrowRight'])  move.add(right);
+    if (this.keys['KeyA'] || this.keys['ArrowLeft'])   move.sub(right);
+
+    // Space / Shift for vertical
+    if (this.keys['Space'])    move.y += 1;
+    if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) move.y -= 1;
+
+    if (move.lengthSq() === 0) return;
+
+    move.normalize().multiplyScalar(this.speed * dt);
+
+    // Move both target and camera together
+    this.controls.target.add(move);
+    this.camera.position.add(move);
+  }
+}
+
+// ── Stats display ──────────────────────────────────
+function updateStats(chunks, vertices, triangles, pending) {
+  const fmt = (n) => n.toLocaleString();
+  document.getElementById('stat-chunks').innerHTML = fmt(chunks);
+  document.getElementById('stat-verts').innerHTML = fmt(vertices);
+  document.getElementById('stat-tris').innerHTML = fmt(triangles);
+  document.getElementById('stat-time').innerHTML = pending > 0 ? fmt(pending) : '0';
+}
+
+// ── Chunk Manager ──────────────────────────────────
+class ChunkManager {
+  constructor(scene, material, mesher) {
+    this.scene = scene;
+    this.material = material;
+    this.mesher = mesher;
+
+    // chunkData: Map<key, WasmChunk>  — keeps voxel data alive for neighbor lookups
+    this.chunkData = new Map();
+    // chunkMeshes: Map<key, THREE.Mesh>
+    this.chunkMeshes = new Map();
+    // pending: Set<key> — chunks queued for generation
+    this.pending = new Set();
+
+    this.totalVerts = 0;
+    this.totalTris = 0;
+  }
+
+  key(cx, cz) { return `${cx},${cz}`; }
+
+  update(cameraCX, cameraCZ) {
+    // 1. Determine which chunks should be loaded
+    const needed = new Set();
+    for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
+      for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
+        if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
+        needed.add(this.key(cameraCX + dx, cameraCZ + dz));
+      }
+    }
+
+    // 2. Queue missing chunks
+    for (const k of needed) {
+      if (!this.chunkData.has(k) && !this.pending.has(k)) {
+        this.pending.add(k);
+      }
+    }
+
+    // 3. Process a batch of pending chunks (generate data)
+    let processed = 0;
+    for (const k of this.pending) {
+      if (processed >= CHUNKS_PER_FRAME) break;
+      const [cx, cz] = k.split(',').map(Number);
+      this.chunkData.set(k, generateChunkData(cx, cz));
+      this.pending.delete(k);
+      processed++;
+
+      // Mesh this chunk + re-mesh affected neighbors
+      this._meshChunk(cx, cz);
+      this._remeshNeighbors(cx, cz);
+    }
+
+    // 4. Unload distant chunks
+    for (const [k] of this.chunkData) {
+      if (!needed.has(k)) {
+        const [cx, cz] = k.split(',').map(Number);
+        const dx = cx - cameraCX;
+        const dz = cz - cameraCZ;
+        if (dx * dx + dz * dz > UNLOAD_DISTANCE * UNLOAD_DISTANCE) {
+          this._unloadChunk(k);
+        }
+      }
+    }
+  }
+
+  _meshChunk(cx, cz) {
+    const k = this.key(cx, cz);
+    const chunk = this.chunkData.get(k);
+    if (!chunk) return;
+
+    // Remove old mesh if exists
+    this._removeMesh(k);
+
+    // Build neighbors
+    const neighbors = new WasmChunkNeighbors(CHUNK_SIZE);
+    const px = this.chunkData.get(this.key(cx + 1, cz));
+    const nx = this.chunkData.get(this.key(cx - 1, cz));
+    const pz = this.chunkData.get(this.key(cx, cz + 1));
+    const nz = this.chunkData.get(this.key(cx, cz - 1));
+    if (px) neighbors.set_neighbor(FACE_POS_X, px);
+    if (nx) neighbors.set_neighbor(FACE_NEG_X, nx);
+    if (pz) neighbors.set_neighbor(FACE_POS_Z, pz);
+    if (nz) neighbors.set_neighbor(FACE_NEG_Z, nz);
+
+    const result = this.mesher.mesh_with_neighbors(chunk, neighbors);
+
+    if (!result.is_empty()) {
+      const geometry = buildGeometry(result);
+      const mesh = new THREE.Mesh(geometry, this.material);
+      mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+      this.scene.add(mesh);
+      this.chunkMeshes.set(k, mesh);
+      this.totalVerts += result.vertex_count();
+      this.totalTris += result.index_count() / 3;
+    }
+
+    result.free();
+    neighbors.free();
+  }
+
+  _remeshNeighbors(cx, cz) {
+    // When a new chunk is loaded, its 4 neighbors need re-meshing
+    // to cull the newly shared boundary faces
+    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nk = this.key(cx + dx, cz + dz);
+      if (this.chunkData.has(nk) && this.chunkMeshes.has(nk)) {
+        this._meshChunk(cx + dx, cz + dz);
+      }
+    }
+  }
+
+  _removeMesh(k) {
+    const existing = this.chunkMeshes.get(k);
+    if (existing) {
+      this.totalVerts -= existing.geometry.getAttribute('position').count;
+      this.totalTris -= existing.geometry.index.count / 3;
+      this.scene.remove(existing);
+      existing.geometry.dispose();
+      this.chunkMeshes.delete(k);
+    }
+  }
+
+  _unloadChunk(k) {
+    this._removeMesh(k);
+    const chunk = this.chunkData.get(k);
+    if (chunk) {
+      chunk.free();
+      this.chunkData.delete(k);
+    }
+  }
+}
+
+// ── Main ───────────────────────────────────────────
+async function main() {
+  await init();
+
+  const container = document.getElementById('scene-container');
+  const { renderer, scene, camera, controls } = createScene(container);
+
+  const material = createTerrainMaterial();
+  const mesher = new WasmGreedyMesher(CHUNK_SIZE);
+  const chunkManager = new ChunkManager(scene, material, mesher);
+  const mover = new KeyboardMover(controls, camera);
+
+  // Hide loading, reveal UI
+  document.getElementById('loading').classList.add('hidden');
+  document.body.classList.add('ready');
+
+  let lastCameraCX = null;
+  let lastCameraCZ = null;
+  let lastTime = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const now = performance.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+
+    mover.update(dt);
+    controls.update();
+
+    // Determine camera chunk position from orbit target
+    const target = controls.target;
+    const cameraCX = Math.floor(target.x / CHUNK_SIZE);
+    const cameraCZ = Math.floor(target.z / CHUNK_SIZE);
+
+    // Update fog center
+    material.uniforms.uCameraTarget.value.copy(target);
+
+    // Always tick the manager (processes pending queue)
+    // but only re-evaluate needed set when camera chunk changes
+    if (cameraCX !== lastCameraCX || cameraCZ !== lastCameraCZ || chunkManager.pending.size > 0) {
+      chunkManager.update(cameraCX, cameraCZ);
+      lastCameraCX = cameraCX;
+      lastCameraCZ = cameraCZ;
+      updateStats(chunkManager.chunkMeshes.size, chunkManager.totalVerts, chunkManager.totalTris, chunkManager.pending.size);
+    }
+
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+main().catch(err => {
+  console.error('Failed to initialize:', err);
+  document.querySelector('.loading-text').textContent = 'Error — check console';
+});
+</script>
+</body>
+</html>

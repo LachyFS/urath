@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/voxel-mesh-core", "crates/voxel-mesh-wasm"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+voxel-mesh-core = { path = "crates/voxel-mesh-core" }
+thiserror = "2"
