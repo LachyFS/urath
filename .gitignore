@@ -4,3 +4,4 @@ packages/*/dist/
 packages/*/wasm/
 pkg/
 .DS_Store
+.playwright-mcp
