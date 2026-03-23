@@ -89,7 +89,7 @@
 
   .stats-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 2px;
   }
 
@@ -101,8 +101,8 @@
   }
 
   .stat-cell:first-child { border-radius: 6px 0 0 0; }
-  .stat-cell:nth-child(2) { border-radius: 0 6px 0 0; }
-  .stat-cell:nth-child(3) { border-radius: 0 0 0 6px; }
+  .stat-cell:nth-child(3) { border-radius: 0 6px 0 0; }
+  .stat-cell:nth-child(4) { border-radius: 0 0 0 6px; }
   .stat-cell:last-child { border-radius: 0 0 6px 0; }
 
   .stat-label {
@@ -400,26 +400,34 @@
 <div class="overlay header">
   <h1>urath</h1>
   <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
-  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · ESC menu</p>
+  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · ESC menu</p>
 </div>
 
 <div class="overlay stats-panel">
   <div class="stats-grid">
     <div class="stat-cell">
-      <div class="stat-label">Chunks</div>
+      <div class="stat-label">Columns</div>
       <div class="stat-value" id="stat-chunks">—</div>
     </div>
     <div class="stat-cell">
-      <div class="stat-label">Vertices</div>
+      <div class="stat-label">Draw Verts</div>
       <div class="stat-value" id="stat-verts">—</div>
     </div>
     <div class="stat-cell">
-      <div class="stat-label">Triangles</div>
+      <div class="stat-label">Draw Tris</div>
       <div class="stat-value" id="stat-tris">—</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">FPS</div>
+      <div class="stat-value" id="stat-fps">—</div>
     </div>
     <div class="stat-cell">
       <div class="stat-label">Pending</div>
       <div class="stat-value" id="stat-time">—</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">Wireframe <span style="font-size:7px;color:var(--text-dim)">F</span></div>
+      <div class="stat-value" id="stat-wireframe" style="cursor:pointer">OFF</div>
     </div>
   </div>
 </div>
@@ -463,19 +471,22 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher } from './pkg/urath_wasm.js';
+import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher, WasmTerrainGenerator } from './pkg/urath_wasm.js';
 
 // Face direction constants matching Rust Face enum
 const FACE_POS_X = 0;
 const FACE_NEG_X = 1;
+const FACE_POS_Y = 2;
+const FACE_NEG_Y = 3;
 const FACE_POS_Z = 4;
 const FACE_NEG_Z = 5;
 
 // ── Constants ──────────────────────────────────────
 const CHUNK_SIZE = 32;
-const RENDER_DISTANCE = 6;       // chunks from camera center
+const WORLD_HEIGHT_CHUNKS = 8;   // vertical chunks (8 × 32 = 256 blocks tall)
+const RENDER_DISTANCE = 6;       // chunks from camera center (XZ)
 const UNLOAD_DISTANCE = 8;       // chunks before disposal
-const CHUNKS_PER_FRAME = 3;      // max chunks to gen/mesh per frame
+const CHUNKS_PER_FRAME = 3;      // max columns to gen per frame
 
 // ── Block IDs ─────────────────────────────────────
 const BLOCK_AIR    = 0;
@@ -489,299 +500,182 @@ const BLOCK_GRAVEL = 7;
 const BLOCK_LOG    = 8;
 const BLOCK_LEAVES = 9;
 
-// ── Hash-based noise ──────────────────────────────
-// Self-contained value noise — no external deps needed.
-function _hash(x, y) {
-  let h = (x * 374761393 + y * 668265263 + 1376312589) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
-  h = h ^ (h >>> 16);
-  return (h & 0x7fffffff) / 0x7fffffff; // 0..1
+// ── Texture loading ────────────────────────────────
+// Texture layers — order must match getTextureLayer() in the shader.
+const TEXTURE_FILES = [
+  'stone.png',       // 0
+  'dirt.png',        // 1
+  'grass_top.png',   // 2
+  'grass_side.png',  // 3
+  'sand.png',        // 4
+  'water.png',       // 5
+  'snow.png',        // 6
+  'gravel.png',      // 7
+  'wood_top.png',    // 8
+  'wood_side.png',   // 9
+  'leaves.png',      // 10
+  'cobblestone.png', // 11
+  'brick.png',       // 12
+];
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
-function _hash3(x, y, z) {
-  let h = (x * 374761393 + y * 668265263 + z * 1274126177 + 1376312589) | 0;
-  h = Math.imul(h ^ (h >>> 13), 2246822519);
-  h = h ^ (h >>> 16);
-  return (h & 0x7fffffff) / 0x7fffffff;
-}
+async function loadTextureArray() {
+  const size = 16;
+  const count = TEXTURE_FILES.length;
+  const data = new Uint8Array(size * size * 4 * count);
 
-function _lerp(a, b, t) { return a + (b - a) * t; }
-function _smooth(t) { return t * t * (3 - 2 * t); }
-
-function noise2d(x, y) {
-  const ix = Math.floor(x), iy = Math.floor(y);
-  const fx = _smooth(x - ix), fy = _smooth(y - iy);
-  return _lerp(
-    _lerp(_hash(ix, iy),     _hash(ix + 1, iy),     fx),
-    _lerp(_hash(ix, iy + 1), _hash(ix + 1, iy + 1), fx),
-    fy
+  // Load all images in parallel, then extract pixels sequentially
+  const images = await Promise.all(
+    TEXTURE_FILES.map(file => loadImage(`textures/${file}`))
   );
-}
 
-function noise3d(x, y, z) {
-  const ix = Math.floor(x), iy = Math.floor(y), iz = Math.floor(z);
-  const fx = _smooth(x - ix), fy = _smooth(y - iy), fz = _smooth(z - iz);
-  return _lerp(
-    _lerp(
-      _lerp(_hash3(ix, iy, iz),     _hash3(ix+1, iy, iz),     fx),
-      _lerp(_hash3(ix, iy+1, iz),   _hash3(ix+1, iy+1, iz),   fx), fy),
-    _lerp(
-      _lerp(_hash3(ix, iy, iz+1),   _hash3(ix+1, iy, iz+1),   fx),
-      _lerp(_hash3(ix, iy+1, iz+1), _hash3(ix+1, iy+1, iz+1), fx), fy),
-    fz
-  );
-}
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-function fbm2d(x, y, octaves) {
-  let val = 0, amp = 1, freq = 1, max = 0;
-  for (let i = 0; i < octaves; i++) {
-    val += noise2d(x * freq, y * freq) * amp;
-    max += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return val / max;
-}
-
-function fbm3d(x, y, z, octaves) {
-  let val = 0, amp = 1, freq = 1, max = 0;
-  for (let i = 0; i < octaves; i++) {
-    val += noise3d(x * freq, y * freq, z * freq) * amp;
-    max += amp;
-    amp *= 0.5;
-    freq *= 2;
-  }
-  return val / max;
-}
-
-// ── Biome system ──────────────────────────────────
-// Temperature and moisture fields drive biome selection.
-const SEA_LEVEL = 10;
-
-// Returns: { biome, baseHeight }
-function getBiome(wx, wz) {
-  const temp     = fbm2d(wx * 0.004 + 100, wz * 0.004 + 100, 4);   // 0..1
-  const moisture = fbm2d(wx * 0.005 - 200, wz * 0.005 + 300, 4);   // 0..1
-
-  // Continental shape: broad, slow undulation
-  const continent = fbm2d(wx * 0.006, wz * 0.006, 5);
-  // Detail noise adds local roughness
-  const detail    = fbm2d(wx * 0.03, wz * 0.03, 3);
-
-  if (temp > 0.6 && moisture < 0.35) {
-    // ── Desert ──
-    const h = SEA_LEVEL + 1 + Math.floor((continent * 4) + detail * 2);
-    return { biome: 'desert', height: Math.min(h, CHUNK_SIZE - 1) };
+  for (let i = 0; i < images.length; i++) {
+    ctx.save();
+    ctx.clearRect(0, 0, size, size);
+    // Flip vertically so V=0 is the image bottom (OpenGL convention)
+    ctx.translate(0, size);
+    ctx.scale(1, -1);
+    ctx.drawImage(images[i], 0, 0, size, size);
+    ctx.restore();
+    const imageData = ctx.getImageData(0, 0, size, size);
+    data.set(imageData.data, i * size * size * 4);
   }
 
-  if (temp < 0.3) {
-    // ── Mountains ──
-    const ridge = Math.abs(noise2d(wx * 0.012 + 500, wz * 0.012 + 500) - 0.5) * 2; // 0..1
-    const h = SEA_LEVEL + 4 + Math.floor(continent * 12 + ridge * 14 + detail * 3);
-    return { biome: 'mountain', height: Math.min(h, CHUNK_SIZE - 1) };
-  }
-
-  if (moisture > 0.55) {
-    // ── Forest ──
-    const h = SEA_LEVEL + 2 + Math.floor(continent * 8 + detail * 4);
-    return { biome: 'forest', height: Math.min(h, CHUNK_SIZE - 1) };
-  }
-
-  // ── Plains ──
-  const h = SEA_LEVEL + 1 + Math.floor(continent * 6 + detail * 3);
-  return { biome: 'plains', height: Math.min(h, CHUNK_SIZE - 1) };
-}
-
-// ── Terrain generation ─────────────────────────────
-function generateChunkData(cx, cz) {
-  const chunk = WasmChunk.new_default();
-  const ox = cx * CHUNK_SIZE;
-  const oz = cz * CHUNK_SIZE;
-
-  // First pass: terrain + caves + water
-  for (let lz = 0; lz < CHUNK_SIZE; lz++) {
-    for (let lx = 0; lx < CHUNK_SIZE; lx++) {
-      const wx = ox + lx;
-      const wz = oz + lz;
-      const { biome, height } = getBiome(wx, wz);
-
-      for (let y = 0; y < height; y++) {
-        // Cave carving with 3D noise
-        if (y > 0 && y < height - 1) {
-          const cave = fbm3d(wx * 0.05, y * 0.07, wz * 0.05, 3);
-          if (cave > 0.62) continue; // carve cave
-        }
-
-        let blockId;
-        if (biome === 'desert') {
-          blockId = y < height - 4 ? BLOCK_STONE : BLOCK_SAND;
-        } else if (biome === 'mountain') {
-          if (y < height - 2) blockId = BLOCK_STONE;
-          else if (height > 24) blockId = BLOCK_SNOW;
-          else if (height > 18) blockId = BLOCK_GRAVEL;
-          else blockId = BLOCK_STONE;
-        } else {
-          // Plains / Forest
-          if (y < height - 3) blockId = BLOCK_STONE;
-          else if (y < height - 1) blockId = BLOCK_DIRT;
-          else {
-            // Beach sand near water
-            blockId = (height <= SEA_LEVEL + 2) ? BLOCK_SAND : BLOCK_GRASS;
-          }
-        }
-        chunk.set_block(lx, y, lz, blockId);
-      }
-
-      // Water fill
-      for (let y = height; y < SEA_LEVEL; y++) {
-        chunk.set_block(lx, y, lz, BLOCK_WATER);
-      }
-    }
-  }
-
-  // Second pass: trees (forest & plains biomes)
-  // Use deterministic hash per column so trees are consistent across chunks
-  for (let lz = 2; lz < CHUNK_SIZE - 2; lz++) {
-    for (let lx = 2; lx < CHUNK_SIZE - 2; lx++) {
-      const wx = ox + lx;
-      const wz = oz + lz;
-      const { biome, height } = getBiome(wx, wz);
-
-      if (height <= SEA_LEVEL + 2) continue; // no trees on beaches / underwater
-
-      const treeChance = biome === 'forest' ? 0.01 : biome === 'plains' ? 0.002 : 0.0;
-      if (_hash(wx * 7 + 1337, wz * 13 + 7331) > treeChance) continue;
-
-      // Don't place trees where surface isn't grass
-      if (chunk.get_block(lx, height - 1, lz) !== BLOCK_GRASS) continue;
-
-      const trunkH = 4 + Math.floor(_hash(wx + 42, wz + 99) * 3); // 4-6 blocks
-      const topY = height + trunkH;
-      if (topY >= CHUNK_SIZE - 2) continue;
-
-      // Trunk
-      for (let ty = height; ty < topY; ty++) {
-        chunk.set_block(lx, ty, lz, BLOCK_LOG);
-      }
-
-      // Leaf canopy (sphere-ish)
-      const leafR = 2;
-      for (let dy = -1; dy <= 2; dy++) {
-        const ly = topY + dy;
-        if (ly < 0 || ly >= CHUNK_SIZE) continue;
-        const r = dy === 2 ? 1 : leafR;
-        for (let dxx = -r; dxx <= r; dxx++) {
-          for (let dzz = -r; dzz <= r; dzz++) {
-            if (dxx * dxx + dzz * dzz > r * r + 1) continue;
-            const fx = lx + dxx, fz = lz + dzz;
-            if (fx < 0 || fx >= CHUNK_SIZE || fz < 0 || fz >= CHUNK_SIZE) continue;
-            if (chunk.get_block(fx, ly, fz) === BLOCK_AIR) {
-              chunk.set_block(fx, ly, fz, BLOCK_LEAVES);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return chunk;
+  const texture = new THREE.DataArrayTexture(data, size, size, count);
+  texture.magFilter = THREE.NearestFilter;
+  texture.minFilter = THREE.NearestFilter;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.needsUpdate = true;
+  return texture;
 }
 
 // ── Shader material ────────────────────────────────
-function createTerrainMaterial() {
+function createTerrainMaterial(textureArray) {
   return new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
     vertexShader: /* glsl */ `
-      attribute float ao;
-      attribute float blockId;
-      varying float vAo;
-      varying float vBlockId;
-      varying vec3 vNormal;
-      varying vec3 vWorldPos;
+      in float ao;
+      in float blockId;
+      in vec2 texUv;
+
+      out float vAo;
+      out float vBlockId;
+      out vec3 vNormal;
+      out vec3 vWorldPos;
+      out vec2 vUv;
 
       void main() {
         vAo = ao;
         vBlockId = blockId;
-        vNormal = normalMatrix * normal;
+        // World-space normal (model matrix is translation-only, so mat3 is identity)
+        vNormal = normalize(mat3(modelMatrix) * normal);
+        vUv = texUv;
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos = wp.xyz;
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
     fragmentShader: /* glsl */ `
-      uniform vec3 uCameraTarget;
-      varying float vAo;
-      varying float vBlockId;
-      varying vec3 vNormal;
-      varying vec3 vWorldPos;
+      precision highp float;
+      precision highp sampler2DArray;
 
-      // Simple hash for per-block variation
-      float hash(vec2 p) {
-        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+      uniform sampler2DArray uTextureArray;
+      uniform vec3 uCameraTarget;
+      uniform bool uWireframe;
+
+      in float vAo;
+      in float vBlockId;
+      in vec3 vNormal;
+      in vec3 vWorldPos;
+      in vec2 vUv;
+
+      out vec4 fragColor;
+
+      // Map (blockId, faceType) to texture array layer.
+      // faceType: 0=top, 1=side, 2=bottom
+      int getTextureLayer(int bid, int faceType) {
+        if (bid == 1) return 0;   // stone — all faces
+        if (bid == 2) return 1;   // dirt — all faces
+        if (bid == 3) {            // grass
+          if (faceType == 0) return 2;  // grass_top
+          if (faceType == 2) return 1;  // dirt (bottom)
+          return 3;                      // grass_side
+        }
+        if (bid == 4) return 4;   // sand
+        if (bid == 5) return 5;   // water
+        if (bid == 6) return 6;   // snow
+        if (bid == 7) return 7;   // gravel
+        if (bid == 8) {            // log/wood
+          if (faceType == 1) return 9;   // wood_side
+          return 8;                       // wood_top (top & bottom)
+        }
+        if (bid == 9) return 10;  // leaves
+        return 0;
       }
 
       void main() {
         int bid = int(vBlockId + 0.5);
 
-        // Per-block colors
-        vec3 stone  = vec3(0.34, 0.33, 0.35);
-        vec3 dirt   = vec3(0.45, 0.32, 0.22);
-        vec3 grass  = vec3(0.30, 0.55, 0.22);
-        vec3 sand   = vec3(0.76, 0.70, 0.50);
-        vec3 water  = vec3(0.18, 0.35, 0.55);
-        vec3 snow   = vec3(0.85, 0.87, 0.90);
-        vec3 gravel = vec3(0.42, 0.40, 0.38);
-        vec3 log    = vec3(0.36, 0.24, 0.14);
-        vec3 leaves = vec3(0.20, 0.48, 0.16);
+        // Determine face type from normal
+        vec3 n = normalize(vNormal);
+        int faceType;
+        if (n.y > 0.5) faceType = 0;       // top
+        else if (n.y < -0.5) faceType = 2;  // bottom
+        else faceType = 1;                   // side
 
-        vec3 color;
-        if (bid == 1) color = stone;
-        else if (bid == 2) color = dirt;
-        else if (bid == 3) {
-          // Grass: green top, dirt sides
-          float isTop = step(0.9, dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)));
-          color = mix(dirt, grass, isTop);
-        }
-        else if (bid == 4) color = sand;
-        else if (bid == 5) color = water;
-        else if (bid == 6) color = snow;
-        else if (bid == 7) color = gravel;
-        else if (bid == 8) color = log;
-        else if (bid == 9) color = leaves;
-        else color = vec3(1.0, 0.0, 1.0); // debug magenta
+        int layer = getTextureLayer(bid, faceType);
 
-        // Subtle per-block variation so it doesn't look flat
-        float variation = hash(floor(vWorldPos.xz)) * 0.06 - 0.03;
-        color += variation;
+        // Sample texture with tiling UVs (fract handles repeating)
+        vec2 tilingUv = fract(vUv);
+        vec3 color = texture(uTextureArray, vec3(tilingUv, float(layer))).rgb;
 
         // Lighting
         vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
-        float ndotl = dot(normalize(vNormal), lightDir);
+        float ndotl = dot(n, lightDir);
         float diffuse = 0.35 + 0.65 * max(ndotl, 0.0);
 
         float aoFactor = 0.55 + 0.45 * vAo;
-        float skyFill = 0.08 * max(dot(normalize(vNormal), vec3(0.0, 1.0, 0.0)), 0.0);
+        float skyFill = 0.08 * max(n.y, 0.0);
 
         color *= (diffuse * aoFactor + skyFill);
 
-        // Water gets slight translucency vibe via desaturation
+        // Water tint
         if (bid == 5) {
           color *= 0.85;
           color += vec3(0.02, 0.04, 0.08);
         }
 
-        // Fog centered on camera target
-        float dist = length(vWorldPos.xz - uCameraTarget.xz);
-        float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.5).toFixed(1)};
-        float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.85).toFixed(1)};
-        float fog = 1.0 - smoothstep(fogStart, fogEnd, dist);
-        vec3 fogColor = vec3(0.024, 0.024, 0.03);
-        color = mix(fogColor, color, fog);
+        // Fog centered on camera target (disabled in wireframe mode)
+        if (!uWireframe) {
+          float dist = length(vWorldPos.xz - uCameraTarget.xz);
+          float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.5).toFixed(1)};
+          float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.85).toFixed(1)};
+          float fog = 1.0 - smoothstep(fogStart, fogEnd, dist);
+          vec3 fogColor = vec3(0.024, 0.024, 0.03);
+          color = mix(fogColor, color, fog);
+        }
 
-        gl_FragColor = vec4(color, 1.0);
+        fragColor = vec4(color, 1.0);
       }
     `,
     uniforms: {
       uCameraTarget: { value: new THREE.Vector3() },
+      uTextureArray: { value: textureArray },
+      uWireframe: { value: false },
     },
     side: THREE.FrontSide,
   });
@@ -793,6 +687,7 @@ function buildGeometry(meshResult) {
   const normals = meshResult.normals();
   const aoData = meshResult.ao();
   const blockIds = meshResult.block_ids();
+  const uvs = meshResult.uvs();
   const indices = meshResult.indices();
 
   const geometry = new THREE.BufferGeometry();
@@ -800,6 +695,7 @@ function buildGeometry(meshResult) {
   geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
   geometry.setAttribute('ao', new THREE.BufferAttribute(aoData, 1));
   geometry.setAttribute('blockId', new THREE.BufferAttribute(blockIds, 1));
+  geometry.setAttribute('texUv', new THREE.BufferAttribute(uvs, 2));
   geometry.setIndex(new THREE.BufferAttribute(indices, 1));
   geometry.computeBoundingBox();
 
@@ -817,7 +713,7 @@ function createScene(container) {
   const scene = new THREE.Scene();
 
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(16, 24, 16);
+  camera.position.set(16, 50, 16);
 
   const controls = new PointerLockControls(camera, renderer.domElement);
 
@@ -872,142 +768,226 @@ class KeyboardMover {
 }
 
 // ── Stats display ──────────────────────────────────
-function updateStats(chunks, vertices, triangles, pending) {
+function updateStats(renderer, chunkManager) {
   const fmt = (n) => n.toLocaleString();
-  document.getElementById('stat-chunks').innerHTML = fmt(chunks);
-  document.getElementById('stat-verts').innerHTML = fmt(vertices);
-  document.getElementById('stat-tris').innerHTML = fmt(triangles);
-  document.getElementById('stat-time').innerHTML = pending > 0 ? fmt(pending) : '0';
+  document.getElementById('stat-chunks').innerHTML = fmt(chunkManager.columnMeshes.size);
+  document.getElementById('stat-verts').innerHTML = fmt(renderer.info.render.triangles * 3);
+  document.getElementById('stat-tris').innerHTML = fmt(renderer.info.render.triangles);
+  document.getElementById('stat-time').innerHTML = chunkManager.pending.size > 0 ? fmt(chunkManager.pending.size) : '0';
 }
 
 // ── Chunk Manager ──────────────────────────────────
+// Merges all Y-chunks in a column into a single mesh to reduce draw calls.
 class ChunkManager {
-  constructor(scene, material, mesher) {
+  constructor(scene, material, mesher, terrainGen) {
     this.scene = scene;
     this.material = material;
     this.mesher = mesher;
+    this.terrainGen = terrainGen;
 
-    // chunkData: Map<key, WasmChunk>  — keeps voxel data alive for neighbor lookups
+    // chunkData: Map<chunkKey, WasmChunk>
     this.chunkData = new Map();
-    // chunkMeshes: Map<key, THREE.Mesh>
-    this.chunkMeshes = new Map();
-    // pending: Set<key> — chunks queued for generation
+    // columnMeshes: Map<colKey, THREE.Mesh> — one merged mesh per XZ column
+    this.columnMeshes = new Map();
+    // pending: Set<colKey> — columns queued for generation
     this.pending = new Set();
-
-    this.totalVerts = 0;
-    this.totalTris = 0;
   }
 
-  key(cx, cz) { return `${cx},${cz}`; }
+  key(cx, cy, cz) { return `${cx},${cy},${cz}`; }
+  colKey(cx, cz) { return `${cx},${cz}`; }
 
   update(cameraCX, cameraCZ) {
-    // 1. Determine which chunks should be loaded
-    const needed = new Set();
+    // 1. Determine which columns should be loaded
+    const neededCols = new Set();
     for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
       for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
         if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
-        needed.add(this.key(cameraCX + dx, cameraCZ + dz));
+        neededCols.add(this.colKey(cameraCX + dx, cameraCZ + dz));
       }
     }
 
-    // 2. Queue missing chunks
-    for (const k of needed) {
-      if (!this.chunkData.has(k) && !this.pending.has(k)) {
-        this.pending.add(k);
+    // 2. Queue missing columns
+    for (const ck of neededCols) {
+      const [cx, cz] = ck.split(',').map(Number);
+      if (!this.chunkData.has(this.key(cx, 0, cz)) && !this.pending.has(ck)) {
+        this.pending.add(ck);
       }
     }
 
-    // 3. Process a batch of pending chunks (generate data)
+    // 3. Process a batch of pending columns
     let processed = 0;
-    for (const k of this.pending) {
+    for (const ck of this.pending) {
       if (processed >= CHUNKS_PER_FRAME) break;
-      const [cx, cz] = k.split(',').map(Number);
-      this.chunkData.set(k, generateChunkData(cx, cz));
-      this.pending.delete(k);
+      const [cx, cz] = ck.split(',').map(Number);
+
+      for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+        this.chunkData.set(this.key(cx, cy, cz), this.terrainGen.generate(cx, cy, cz));
+      }
+      this.pending.delete(ck);
       processed++;
 
-      // Mesh this chunk + re-mesh affected neighbors
-      this._meshChunk(cx, cz);
-      this._remeshNeighbors(cx, cz);
+      this._meshColumn(cx, cz);
+      this._remeshNeighborColumns(cx, cz);
     }
 
-    // 4. Unload distant chunks
+    // 4. Unload distant columns
+    const unloadCols = new Set();
     for (const [k] of this.chunkData) {
-      if (!needed.has(k)) {
-        const [cx, cz] = k.split(',').map(Number);
+      const [cx, , cz] = k.split(',').map(Number);
+      const ck = this.colKey(cx, cz);
+      if (!neededCols.has(ck) && !unloadCols.has(ck)) {
         const dx = cx - cameraCX;
         const dz = cz - cameraCZ;
         if (dx * dx + dz * dz > UNLOAD_DISTANCE * UNLOAD_DISTANCE) {
-          this._unloadChunk(k);
+          unloadCols.add(ck);
         }
       }
     }
+    for (const ck of unloadCols) {
+      this._unloadColumn(ck);
+    }
   }
 
-  _meshChunk(cx, cz) {
-    const k = this.key(cx, cz);
-    const chunk = this.chunkData.get(k);
-    if (!chunk) return;
+  // Mesh all Y-chunks in a column and merge into a single geometry.
+  _meshColumn(cx, cz) {
+    const ck = this.colKey(cx, cz);
+    this._removeColumnMesh(ck);
 
-    // Remove old mesh if exists
-    this._removeMesh(k);
+    // Mesh each Y-chunk, collect non-empty results
+    const slices = [];
+    let totalVerts = 0;
+    let totalIdx = 0;
 
-    // Build neighbors
-    const neighbors = new WasmChunkNeighbors(CHUNK_SIZE);
-    const px = this.chunkData.get(this.key(cx + 1, cz));
-    const nx = this.chunkData.get(this.key(cx - 1, cz));
-    const pz = this.chunkData.get(this.key(cx, cz + 1));
-    const nz = this.chunkData.get(this.key(cx, cz - 1));
-    if (px) neighbors.set_neighbor(FACE_POS_X, px);
-    if (nx) neighbors.set_neighbor(FACE_NEG_X, nx);
-    if (pz) neighbors.set_neighbor(FACE_POS_Z, pz);
-    if (nz) neighbors.set_neighbor(FACE_NEG_Z, nz);
+    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+      const chunk = this.chunkData.get(this.key(cx, cy, cz));
+      if (!chunk) continue;
 
-    const result = this.mesher.mesh_with_neighbors(chunk, neighbors);
+      const neighbors = new WasmChunkNeighbors(CHUNK_SIZE);
+      const px = this.chunkData.get(this.key(cx + 1, cy, cz));
+      const nx = this.chunkData.get(this.key(cx - 1, cy, cz));
+      const py = this.chunkData.get(this.key(cx, cy + 1, cz));
+      const ny = this.chunkData.get(this.key(cx, cy - 1, cz));
+      const pz = this.chunkData.get(this.key(cx, cy, cz + 1));
+      const nz = this.chunkData.get(this.key(cx, cy, cz - 1));
+      if (px) neighbors.set_neighbor(FACE_POS_X, px);
+      if (nx) neighbors.set_neighbor(FACE_NEG_X, nx);
+      if (py) neighbors.set_neighbor(FACE_POS_Y, py);
+      if (ny) neighbors.set_neighbor(FACE_NEG_Y, ny);
+      if (pz) neighbors.set_neighbor(FACE_POS_Z, pz);
+      if (nz) neighbors.set_neighbor(FACE_NEG_Z, nz);
 
-    if (!result.is_empty()) {
-      const geometry = buildGeometry(result);
-      const mesh = new THREE.Mesh(geometry, this.material);
-      mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-      this.scene.add(mesh);
-      this.chunkMeshes.set(k, mesh);
-      this.totalVerts += result.vertex_count();
-      this.totalTris += result.index_count() / 3;
+      const result = this.mesher.mesh_with_neighbors(chunk, neighbors);
+      neighbors.free();
+
+      if (!result.is_empty()) {
+        const vc = result.vertex_count();
+        const ic = result.index_count();
+        slices.push({
+          cy,
+          positions: result.positions(),
+          normals: result.normals(),
+          ao: result.ao(),
+          blockIds: result.block_ids(),
+          uvs: result.uvs(),
+          indices: result.indices(),
+          vc, ic,
+        });
+        totalVerts += vc;
+        totalIdx += ic;
+      }
+      result.free();
     }
 
-    result.free();
-    neighbors.free();
+    if (slices.length === 0) return;
+
+    // Merge into single buffers
+    const positions = new Float32Array(totalVerts * 3);
+    const normals = new Float32Array(totalVerts * 3);
+    const ao = new Float32Array(totalVerts);
+    const blockIds = new Float32Array(totalVerts);
+    const uvs = new Float32Array(totalVerts * 2);
+    const indices = new Uint32Array(totalIdx);
+
+    let vOff = 0;
+    let iOff = 0;
+
+    for (const s of slices) {
+      const yOffset = s.cy * CHUNK_SIZE;
+      const p = s.positions;
+      const base3 = vOff * 3;
+
+      // Copy positions with Y offset
+      for (let i = 0; i < p.length; i += 3) {
+        positions[base3 + i]     = p[i];
+        positions[base3 + i + 1] = p[i + 1] + yOffset;
+        positions[base3 + i + 2] = p[i + 2];
+      }
+
+      normals.set(s.normals, base3);
+      ao.set(s.ao, vOff);
+      blockIds.set(s.blockIds, vOff);
+      uvs.set(s.uvs, vOff * 2);
+
+      // Copy indices with vertex offset
+      const idx = s.indices;
+      for (let i = 0; i < idx.length; i++) {
+        indices[iOff + i] = idx[i] + vOff;
+      }
+
+      vOff += s.vc;
+      iOff += s.ic;
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geometry.setAttribute('ao', new THREE.BufferAttribute(ao, 1));
+    geometry.setAttribute('blockId', new THREE.BufferAttribute(blockIds, 1));
+    geometry.setAttribute('texUv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.computeBoundingBox();
+
+    const mesh = new THREE.Mesh(geometry, this.material);
+    mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+    this.scene.add(mesh);
+    this.columnMeshes.set(ck, mesh);
   }
 
-  _remeshNeighbors(cx, cz) {
-    // When a new chunk is loaded, its 4 neighbors need re-meshing
-    // to cull the newly shared boundary faces
+  _remeshNeighborColumns(cx, cz) {
     for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const nk = this.key(cx + dx, cz + dz);
-      if (this.chunkData.has(nk) && this.chunkMeshes.has(nk)) {
-        this._meshChunk(cx + dx, cz + dz);
+      const ncx = cx + dx, ncz = cz + dz;
+      const nck = this.colKey(ncx, ncz);
+      if (this.chunkData.has(this.key(ncx, 0, ncz))) {
+        this._meshColumn(ncx, ncz);
       }
     }
   }
 
-  _removeMesh(k) {
-    const existing = this.chunkMeshes.get(k);
+  _removeColumnMesh(ck) {
+    const existing = this.columnMeshes.get(ck);
     if (existing) {
-      this.totalVerts -= existing.geometry.getAttribute('position').count;
-      this.totalTris -= existing.geometry.index.count / 3;
       this.scene.remove(existing);
       existing.geometry.dispose();
-      this.chunkMeshes.delete(k);
+      this.columnMeshes.delete(ck);
     }
   }
 
-  _unloadChunk(k) {
-    this._removeMesh(k);
-    const chunk = this.chunkData.get(k);
-    if (chunk) {
-      chunk.free();
-      this.chunkData.delete(k);
+  _unloadColumn(ck) {
+    this._removeColumnMesh(ck);
+    const [cx, cz] = ck.split(',').map(Number);
+    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+      const k = this.key(cx, cy, cz);
+      const chunk = this.chunkData.get(k);
+      if (chunk) {
+        chunk.free();
+        this.chunkData.delete(k);
+      }
     }
+  }
+
+  // Remesh a single column (used by block editing)
+  remeshColumn(cx, cz) {
+    this._meshColumn(cx, cz);
   }
 }
 
@@ -1059,52 +1039,58 @@ function getBrushOffsets(brush, radius, normal) {
 // ── Voxel editing ─────────────────────────────────
 function worldToChunkLocal(wx, wy, wz) {
   const cx = Math.floor(wx / CHUNK_SIZE);
+  const cy = Math.floor(wy / CHUNK_SIZE);
   const cz = Math.floor(wz / CHUNK_SIZE);
   const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
+  const ly = ((wy % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
   const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  return { cx, cz, lx, ly: wy, lz };
+  return { cx, cy, cz, lx, ly, lz };
 }
 
 // Batch edit: group blocks by chunk, use set_blocks, remesh each chunk once.
 function batchEditBlocks(chunkManager, edits) {
+  const worldHeight = WORLD_HEIGHT_CHUNKS * CHUNK_SIZE;
   // Group edits by chunk key
-  const byChunk = new Map(); // key -> { chunk, edits: [x,y,z,id,...], boundaries: Set }
+  const byChunk = new Map(); // key -> { cx, cy, cz, chunk, edits: [x,y,z,id,...], boundaries: Set }
   for (const { x: wx, y: wy, z: wz, blockId } of edits) {
-    if (wy < 0 || wy >= CHUNK_SIZE) continue;
-    const { cx, cz, lx, ly, lz } = worldToChunkLocal(wx, wy, wz);
-    const k = chunkManager.key(cx, cz);
+    if (wy < 0 || wy >= worldHeight) continue;
+    const { cx, cy, cz, lx, ly, lz } = worldToChunkLocal(wx, wy, wz);
+    const k = chunkManager.key(cx, cy, cz);
     const chunk = chunkManager.chunkData.get(k);
     if (!chunk) continue;
 
     if (!byChunk.has(k)) {
-      byChunk.set(k, { cx, cz, chunk, edits: [], boundaries: new Set() });
+      byChunk.set(k, { cx, cy, cz, chunk, edits: [], boundaries: new Set() });
     }
     const entry = byChunk.get(k);
     entry.edits.push(lx, ly, lz, blockId);
 
     // Track which boundary neighbors need remeshing
-    if (lx === 0)              entry.boundaries.add(chunkManager.key(cx - 1, cz));
-    if (lx === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx + 1, cz));
-    if (lz === 0)              entry.boundaries.add(chunkManager.key(cx, cz - 1));
-    if (lz === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cz + 1));
+    if (lx === 0)              entry.boundaries.add(chunkManager.key(cx - 1, cy, cz));
+    if (lx === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx + 1, cy, cz));
+    if (ly === 0)              entry.boundaries.add(chunkManager.key(cx, cy - 1, cz));
+    if (ly === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cy + 1, cz));
+    if (lz === 0)              entry.boundaries.add(chunkManager.key(cx, cy, cz - 1));
+    if (lz === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cy, cz + 1));
   }
 
-  // Apply edits and collect all chunks that need remeshing
-  const remeshSet = new Set();
-  for (const [k, { cx, cz, chunk, edits, boundaries }] of byChunk) {
+  // Apply edits and collect all columns that need remeshing
+  const remeshCols = new Set();
+  for (const [k, { cx, cy, cz, chunk, edits, boundaries }] of byChunk) {
     chunk.set_blocks(new Uint32Array(edits));
-    remeshSet.add(k);
-    for (const bk of boundaries) remeshSet.add(bk);
+    remeshCols.add(chunkManager.colKey(cx, cz));
+    for (const bk of boundaries) {
+      if (!chunkManager.chunkData.has(bk)) continue;
+      const [bcx, , bcz] = bk.split(',').map(Number);
+      remeshCols.add(chunkManager.colKey(bcx, bcz));
+    }
   }
 
-  // Remesh each affected chunk exactly once
-  for (const k of remeshSet) {
-    if (!chunkManager.chunkData.has(k)) continue;
-    const [cx, cz] = k.split(',').map(Number);
-    chunkManager._meshChunk(cx, cz);
+  // Remesh each affected column exactly once
+  for (const ck of remeshCols) {
+    const [cx, cz] = ck.split(',').map(Number);
+    chunkManager.remeshColumn(cx, cz);
   }
-
-  updateStats(chunkManager.chunkMeshes.size, chunkManager.totalVerts, chunkManager.totalTris, chunkManager.pending.size);
 }
 
 // Single-block edit (convenience wrapper)
@@ -1123,7 +1109,7 @@ function brushEdit(chunkManager, center, blockId, normal) {
 
 function getTargetBlock(raycaster, mouse, camera, chunkManager) {
   raycaster.setFromCamera(mouse, camera);
-  const meshes = Array.from(chunkManager.chunkMeshes.values());
+  const meshes = Array.from(chunkManager.columnMeshes.values());
   const hits = raycaster.intersectObjects(meshes, false);
   if (hits.length === 0) return null;
 
@@ -1167,12 +1153,15 @@ function updateBrushUI() {
 async function main() {
   await init();
 
+  const textureArray = await loadTextureArray();
+
   const container = document.getElementById('scene-container');
   const { renderer, scene, camera, controls } = createScene(container);
 
-  const material = createTerrainMaterial();
+  const material = createTerrainMaterial(textureArray);
   const mesher = new WasmGreedyMesher(CHUNK_SIZE);
-  const chunkManager = new ChunkManager(scene, material, mesher);
+  const terrainGen = new WasmTerrainGenerator();
+  const chunkManager = new ChunkManager(scene, material, mesher, terrainGen);
   const mover = new KeyboardMover(camera);
 
   // ── Editing state ──
@@ -1250,6 +1239,10 @@ async function main() {
       const modes = [BRUSH_SINGLE, BRUSH_SPHERE, BRUSH_LINE];
       currentBrush = modes[(modes.indexOf(currentBrush) + 1) % modes.length];
       updateBrushUI();
+    } else if (e.code === 'KeyF') {
+      material.wireframe = !material.wireframe;
+      material.uniforms.uWireframe.value = material.wireframe;
+      document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
     } else if (e.key === '[') {
       brushRadius = Math.max(1, brushRadius - 1);
       updateBrushUI();
@@ -1286,9 +1279,21 @@ async function main() {
     updateBrushUI();
   });
 
+  document.getElementById('stat-wireframe').addEventListener('click', (e) => {
+    e.stopPropagation();
+    material.wireframe = !material.wireframe;
+    material.uniforms.uWireframe.value = material.wireframe;
+    e.target.textContent = material.wireframe ? 'ON' : 'OFF';
+  });
+
   // Hide loading, reveal UI
   document.getElementById('loading').classList.add('hidden');
   document.body.classList.add('ready');
+
+  // FPS counter
+  let fpsFrames = 0;
+  let fpsLastUpdate = performance.now();
+  const fpsEl = document.getElementById('stat-fps');
 
   let lastCameraCX = null;
   let lastCameraCZ = null;
@@ -1315,7 +1320,6 @@ async function main() {
       chunkManager.update(cameraCX, cameraCZ);
       lastCameraCX = cameraCX;
       lastCameraCZ = cameraCZ;
-      updateStats(chunkManager.chunkMeshes.size, chunkManager.totalVerts, chunkManager.totalTris, chunkManager.pending.size);
     }
 
     // Hover highlight (always from screen center in first person)
@@ -1329,6 +1333,15 @@ async function main() {
     }
 
     renderer.render(scene, camera);
+
+    // Stats update after render so renderer.info reflects this frame
+    fpsFrames++;
+    if (now - fpsLastUpdate >= 500) {
+      fpsEl.textContent = Math.round(fpsFrames / ((now - fpsLastUpdate) / 1000));
+      fpsFrames = 0;
+      fpsLastUpdate = now;
+      updateStats(renderer, chunkManager);
+    }
   }
   animate();
 }

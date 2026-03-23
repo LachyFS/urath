@@ -140,6 +140,30 @@ impl Mesher for GreedyMesher {
                         // Compute quad positions
                         let positions = quad_positions(u, v, d, w, h, face);
 
+                        // Tiling UVs: a W×H merged quad tiles the texture W×H times.
+                        // For side faces where u_axis is Y (PosX, NegZ), swap UV
+                        // so texture horizontal maps to a horizontal world axis
+                        // and texture vertical maps to Y (world up).
+                        let wf = w as f32;
+                        let hf = h as f32;
+                        let (u_axis, _) = face.tangent_axes();
+                        let uvs = if u_axis == 1 {
+                            // u_axis is Y — swap so tex_v tracks Y
+                            [
+                                [0.0, 0.0], // v0
+                                [0.0, wf],  // v1: moved along Y → tex V
+                                [hf, wf],   // v2
+                                [hf, 0.0],  // v3: moved along horiz → tex U
+                            ]
+                        } else {
+                            [
+                                [0.0, 0.0], // v0
+                                [wf, 0.0],  // v1
+                                [wf, hf],   // v2
+                                [0.0, hf],  // v3
+                            ]
+                        };
+
                         // Convert AO from u8 (0–3) back to f32 (0.0–1.0)
                         let ao_f32 = [
                             ao_val[0] as f32 / 3.0,
@@ -148,7 +172,7 @@ impl Mesher for GreedyMesher {
                             ao_val[3] as f32 / 3.0,
                         ];
 
-                        output.push_quad(&positions, face.normal_f32(), ao_f32, block_id);
+                        output.push_quad(&positions, face.normal_f32(), ao_f32, block_id, &uvs);
 
                         // Zero out the merged region in the mask
                         for dv in 0..h {

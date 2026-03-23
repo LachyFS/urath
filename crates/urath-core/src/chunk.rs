@@ -321,9 +321,7 @@ mod tests {
         let mut chunk = Chunk::new_default();
         // 3 edits packed as [x, y, z, block_id, ...]
         let edits: Vec<u32> = vec![
-            0, 0, 0, 1,
-            5, 10, 15, 42,
-            31, 31, 31, 7,
+            0, 0, 0, 1, 5, 10, 15, 42, 31, 31, 31, 7,
             // out of bounds — should be skipped
             32, 0, 0, 99,
         ];

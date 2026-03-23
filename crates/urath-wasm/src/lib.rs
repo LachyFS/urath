@@ -1,6 +1,8 @@
 use wasm_bindgen::prelude::*;
 
-use urath::{ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher};
+use urath::{
+    ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher, TerrainConfig, TerrainGenerator,
+};
 
 /// WASM-exposed chunk that holds voxel data.
 #[wasm_bindgen]
@@ -139,6 +141,11 @@ impl WasmMeshResult {
         js_sys::Float32Array::from(&floats[..])
     }
 
+    /// Copy UV coordinates into a new Float32Array (2 floats per vertex).
+    pub fn uvs(&self) -> js_sys::Float32Array {
+        js_sys::Float32Array::from(&self.output.uvs[..])
+    }
+
     /// Copy indices into a new Uint32Array.
     pub fn indices(&self) -> js_sys::Uint32Array {
         js_sys::Uint32Array::from(&self.output.indices[..])
@@ -182,5 +189,48 @@ impl WasmGreedyMesher {
             .mesh(&chunk.inner, &neighbors.inner, &mut output)
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(WasmMeshResult { output })
+    }
+}
+
+/// WASM-exposed terrain generator.
+#[wasm_bindgen]
+pub struct WasmTerrainGenerator {
+    inner: TerrainGenerator,
+}
+
+impl Default for WasmTerrainGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl WasmTerrainGenerator {
+    /// Create a terrain generator with default settings.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmTerrainGenerator {
+        Self {
+            inner: TerrainGenerator::with_defaults(),
+        }
+    }
+
+    /// Create a terrain generator with a custom seed.
+    pub fn with_seed(seed: u32) -> WasmTerrainGenerator {
+        let config = TerrainConfig {
+            seed,
+            ..Default::default()
+        };
+        Self {
+            inner: TerrainGenerator::new(config).expect("default-sized config is valid"),
+        }
+    }
+
+    /// Generate terrain for a chunk at (cx, cy, cz). Returns a WasmChunk.
+    pub fn generate(&mut self, cx: i32, cy: i32, cz: i32) -> Result<WasmChunk, JsError> {
+        let chunk = self
+            .inner
+            .generate(cx, cy, cz)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(WasmChunk { inner: chunk })
     }
 }

@@ -12,6 +12,9 @@ pub struct MeshOutput {
     pub ao: Vec<f32>,
     /// Block ID per vertex — used for texture lookup.
     pub block_ids: Vec<u16>,
+    /// Texture coordinates — 2 floats (u, v) per vertex.
+    /// For greedy-merged quads, UVs tile: a W×H quad gets UVs spanning [0,W]×[0,H].
+    pub uvs: Vec<f32>,
     /// Triangle indices.
     pub indices: Vec<u32>,
     /// Current number of vertices.
@@ -26,6 +29,7 @@ impl MeshOutput {
             normals: Vec::new(),
             ao: Vec::new(),
             block_ids: Vec::new(),
+            uvs: Vec::new(),
             indices: Vec::new(),
             vertex_count: 0,
         }
@@ -41,6 +45,7 @@ impl MeshOutput {
             normals: Vec::with_capacity(verts * 3),
             ao: Vec::with_capacity(verts),
             block_ids: Vec::with_capacity(verts),
+            uvs: Vec::with_capacity(verts * 2),
             indices: Vec::with_capacity(idxs),
             vertex_count: 0,
         }
@@ -52,6 +57,7 @@ impl MeshOutput {
         self.normals.clear();
         self.ao.clear();
         self.block_ids.clear();
+        self.uvs.clear();
         self.indices.clear();
         self.vertex_count = 0;
     }
@@ -87,6 +93,7 @@ impl MeshOutput {
         normal: [f32; 3],
         ao_values: [f32; 4],
         block_id: u16,
+        uvs: &[[f32; 2]; 4],
     ) {
         let base = self.vertex_count;
 
@@ -102,6 +109,9 @@ impl MeshOutput {
 
             self.ao.push(ao_values[i]);
             self.block_ids.push(block_id);
+
+            self.uvs.push(uvs[i][0]);
+            self.uvs.push(uvs[i][1]);
         }
 
         // AO-aware triangulation to fix anisotropy artifacts.
@@ -157,13 +167,15 @@ mod tests {
             [1.0, 1.0, 0.0],
             [0.0, 1.0, 0.0],
         ];
-        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1);
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, &uvs);
         assert_eq!(output.vertex_count(), 4);
         assert_eq!(output.index_count(), 6);
         assert_eq!(output.positions.len(), 12);
         assert_eq!(output.normals.len(), 12);
         assert_eq!(output.ao.len(), 4);
         assert_eq!(output.block_ids.len(), 4);
+        assert_eq!(output.uvs.len(), 8);
     }
 
     #[test]
@@ -175,7 +187,8 @@ mod tests {
             [1.0, 1.0, 0.0],
             [0.0, 1.0, 0.0],
         ];
-        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1);
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, &uvs);
 
         let cap_before = output.positions.capacity();
         output.clear();
@@ -194,9 +207,10 @@ mod tests {
             [1.0, 1.0, 0.0],
             [0.0, 1.0, 0.0],
         ];
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
 
         // Equal AO: uses 1-3 diagonal
-        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1);
+        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 1.0, 1.0, 1.0], 1, &uvs);
         // ao[0]+ao[2] == ao[1]+ao[3], so we take the else branch: (1,2,3), (1,3,0)
         assert_eq!(output.indices[0], 1);
         assert_eq!(output.indices[3], 1);
@@ -204,7 +218,7 @@ mod tests {
         output.clear();
 
         // Unequal AO favoring 0-2 diagonal: ao[0]+ao[2] > ao[1]+ao[3]
-        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 0.0, 1.0, 0.0], 1);
+        output.push_quad(&positions, [0.0, 0.0, 1.0], [1.0, 0.0, 1.0, 0.0], 1, &uvs);
         // (0,1,2), (0,2,3)
         assert_eq!(output.indices[0], 0);
         assert_eq!(output.indices[3], 0);
