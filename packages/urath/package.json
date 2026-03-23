@@ -1,5 +1,5 @@
 {
-  "name": "urath",
+  "name": "@urath/threejs",
   "version": "0.1.0",
   "description": "Rust/WASM voxel meshing toolkit for Three.js",
   "type": "module",
