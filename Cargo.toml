@@ -10,3 +10,8 @@ license = "MIT OR Apache-2.0"
 [workspace.dependencies]
 urath = { path = "crates/urath-core", version = "0.1.0" }
 thiserror = "2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3

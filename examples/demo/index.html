@@ -481,12 +481,15 @@ const FACE_NEG_Y = 3;
 const FACE_POS_Z = 4;
 const FACE_NEG_Z = 5;
 
+// ── Performance test mode ──────────────────────────
+const PERF_MODE = new URLSearchParams(window.location.search).has('perf');
+
 // ── Constants ──────────────────────────────────────
 const CHUNK_SIZE = 32;
 const WORLD_HEIGHT_CHUNKS = 8;   // vertical chunks (8 × 32 = 256 blocks tall)
 const RENDER_DISTANCE = 6;       // chunks from camera center (XZ)
 const UNLOAD_DISTANCE = 8;       // chunks before disposal
-const CHUNKS_PER_FRAME = 3;      // max columns to gen per frame
+const CHUNKS_PER_FRAME = PERF_MODE ? 999 : 3; // unlimited in perf mode
 
 // ── Block IDs ─────────────────────────────────────
 const BLOCK_AIR    = 0;
@@ -791,6 +794,10 @@ class ChunkManager {
     this.columnMeshes = new Map();
     // pending: Set<colKey> — columns queued for generation
     this.pending = new Set();
+
+    // Perf instrumentation
+    this.perfGenTimes = [];   // terrain generation times (ms per chunk)
+    this.perfMeshTimes = [];  // meshing times (ms per column)
   }
 
   key(cx, cy, cz) { return `${cx},${cy},${cz}`; }
@@ -821,7 +828,9 @@ class ChunkManager {
       const [cx, cz] = ck.split(',').map(Number);
 
       for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+        const t0 = performance.now();
         this.chunkData.set(this.key(cx, cy, cz), this.terrainGen.generate(cx, cy, cz));
+        this.perfGenTimes.push(performance.now() - t0);
       }
       this.pending.delete(ck);
       processed++;
@@ -850,6 +859,7 @@ class ChunkManager {
 
   // Mesh all Y-chunks in a column and merge into a single geometry.
   _meshColumn(cx, cz) {
+    const meshT0 = performance.now();
     const ck = this.colKey(cx, cz);
     this._removeColumnMesh(ck);
 
@@ -898,7 +908,10 @@ class ChunkManager {
       result.free();
     }
 
-    if (slices.length === 0) return;
+    if (slices.length === 0) {
+      this.perfMeshTimes.push(performance.now() - meshT0);
+      return;
+    }
 
     // Merge into single buffers
     const positions = new Float32Array(totalVerts * 3);
@@ -951,6 +964,7 @@ class ChunkManager {
     mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
     this.scene.add(mesh);
     this.columnMeshes.set(ck, mesh);
+    this.perfMeshTimes.push(performance.now() - meshT0);
   }
 
   _remeshNeighborColumns(cx, cz) {
@@ -1149,6 +1163,308 @@ function updateBrushUI() {
   radCtrl.style.display = currentBrush === BRUSH_SINGLE ? 'none' : 'flex';
 }
 
+// ── Performance test flythrough ────────────────────
+class PerfFlythrough {
+  constructor(camera, duration = 20) {
+    this.camera = camera;
+    this.duration = duration; // seconds
+    this.elapsed = 0;
+    this.done = false;
+
+    // Circular path params — orbit around the spawn area
+    this.centerX = 16;
+    this.centerZ = 16;
+    this.radius = 160;    // world units (~5 chunks out)
+    this.height = 70;     // Y position
+    this.lookY = 40;      // look at this height
+
+    this.frameTimes = [];
+    this.startTime = null;
+  }
+
+  update(dt) {
+    if (this.done) return;
+    if (this.startTime === null) this.startTime = performance.now();
+
+    this.elapsed += dt;
+    if (this.elapsed >= this.duration) {
+      this.done = true;
+      return;
+    }
+
+    const t = this.elapsed / this.duration;
+
+    // Full circle over the duration
+    const angle = t * Math.PI * 2;
+    const x = this.centerX + Math.cos(angle) * this.radius;
+    const z = this.centerZ + Math.sin(angle) * this.radius;
+
+    // Gentle height oscillation
+    const y = this.height + Math.sin(angle * 2) * 15;
+
+    this.camera.position.set(x, y, z);
+    this.camera.lookAt(this.centerX, this.lookY, this.centerZ);
+  }
+
+  recordFrame(frameMs) {
+    this.frameTimes.push(frameMs);
+  }
+
+  getReport(chunkManager, renderer) {
+    const ft = this.frameTimes.slice().sort((a, b) => a - b);
+    const sum = (arr) => arr.reduce((s, v) => s + v, 0);
+    const avg = (arr) => arr.length ? sum(arr) / arr.length : 0;
+    const pct = (arr, p) => arr.length ? arr[Math.floor(arr.length * p)] : 0;
+
+    const genTimes = chunkManager.perfGenTimes.slice().sort((a, b) => a - b);
+    const meshTimes = chunkManager.perfMeshTimes.slice().sort((a, b) => a - b);
+
+    const wallMs = performance.now() - this.startTime;
+
+    return {
+      wall: wallMs,
+      frames: ft.length,
+      avgFps: ft.length / (wallMs / 1000),
+      frame: {
+        avg: avg(ft),
+        min: ft[0] || 0,
+        max: ft[ft.length - 1] || 0,
+        p50: pct(ft, 0.5),
+        p95: pct(ft, 0.95),
+        p99: pct(ft, 0.99),
+      },
+      gen: {
+        count: genTimes.length,
+        total: sum(genTimes),
+        avg: avg(genTimes),
+        p95: pct(genTimes, 0.95),
+        max: genTimes[genTimes.length - 1] || 0,
+      },
+      mesh: {
+        count: meshTimes.length,
+        total: sum(meshTimes),
+        avg: avg(meshTimes),
+        p95: pct(meshTimes, 0.95),
+        max: meshTimes[meshTimes.length - 1] || 0,
+      },
+      columns: chunkManager.columnMeshes.size,
+      tris: renderer.info.render.triangles,
+    };
+  }
+}
+
+function createPerfHUD() {
+  const hud = document.createElement('div');
+  hud.id = 'perf-hud';
+  hud.style.cssText = `
+    position: fixed; top: 20px; left: 20px; z-index: 100;
+    background: rgba(0,0,0,0.85); border: 1px solid rgba(127,204,129,0.3);
+    border-radius: 8px; padding: 16px 20px; min-width: 300px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: rgba(255,255,255,0.87); line-height: 1.6;
+  `;
+  hud.innerHTML = `
+    <div style="color:#7fcc81; font-weight:700; font-size:14px; margin-bottom:8px;">
+      PERF TEST<span id="perf-phase" style="color:rgba(255,255,255,0.4); font-weight:400; margin-left:8px">starting...</span>
+    </div>
+    <div id="perf-live">
+      <div>FPS: <span id="perf-fps">—</span></div>
+      <div>Frame: <span id="perf-frame">—</span>ms</div>
+      <div>Progress: <span id="perf-progress">0</span>%</div>
+      <div>Columns: <span id="perf-cols">0</span></div>
+      <div>Chunks gen'd: <span id="perf-gens">0</span></div>
+      <div>Columns meshed: <span id="perf-meshes">0</span></div>
+    </div>
+    <div id="perf-report" style="display:none"></div>
+  `;
+  document.body.appendChild(hud);
+  return hud;
+}
+
+function updatePerfHUD(flythrough, chunkManager) {
+  const pct = Math.min(100, Math.round(flythrough.elapsed / flythrough.duration * 100));
+  const ft = flythrough.frameTimes;
+  const recentFps = ft.length > 30
+    ? Math.round(30 / (ft.slice(-30).reduce((s, v) => s + v, 0) / 1000))
+    : '—';
+  const lastFrame = ft.length ? ft[ft.length - 1].toFixed(1) : '—';
+
+  document.getElementById('perf-fps').textContent = recentFps;
+  document.getElementById('perf-frame').textContent = lastFrame;
+  document.getElementById('perf-progress').textContent = pct;
+  document.getElementById('perf-cols').textContent = chunkManager.columnMeshes.size;
+  document.getElementById('perf-gens').textContent = chunkManager.perfGenTimes.length;
+  document.getElementById('perf-meshes').textContent = chunkManager.perfMeshTimes.length;
+  document.getElementById('perf-phase').textContent = 'running';
+}
+
+function showPerfReport(report, frameTimes) {
+  const f = (n) => typeof n === 'number' ? n.toFixed(2) : n;
+  document.getElementById('perf-phase').textContent = 'complete';
+  document.getElementById('perf-live').style.display = 'none';
+  const el = document.getElementById('perf-report');
+  el.style.display = 'block';
+  el.innerHTML = `
+    <table style="border-collapse:collapse; width:100%;">
+      <tr><td colspan="2" style="color:#7fcc81; padding:4px 0; font-weight:500;">Frames</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${report.frames}</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg fps</td><td>${f(report.avgFps)}</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.frame.avg)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p50</td><td>${f(report.frame.p50)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.frame.p95)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p99</td><td>${f(report.frame.p99)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">min / max</td><td>${f(report.frame.min)} / ${f(report.frame.max)} ms</td></tr>
+
+      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Terrain Gen (${report.gen.count} chunks)</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${f(report.gen.total)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.gen.avg)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.gen.p95)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">max</td><td>${f(report.gen.max)} ms</td></tr>
+
+      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Meshing (${report.mesh.count} columns)</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${f(report.mesh.total)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.mesh.avg)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.mesh.p95)} ms</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">max</td><td>${f(report.mesh.max)} ms</td></tr>
+
+      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Scene</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">columns</td><td>${report.columns}</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">triangles</td><td>${report.tris.toLocaleString()}</td></tr>
+      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">wall time</td><td>${f(report.wall / 1000)} s</td></tr>
+    </table>
+    <div style="margin-top:12px; color:rgba(255,255,255,0.3); font-size:10px;">
+      Press R to re-run · Open without ?perf for normal mode
+    </div>
+  `;
+
+  // Draw frame time graph
+  drawFrameGraph(frameTimes, report);
+
+  // Console: clean text report
+  const lines = [
+    `[perf] === PERF TEST COMPLETE ===`,
+    `[perf] Frames: ${report.frames} | avg fps: ${f(report.avgFps)}`,
+    `[perf] Frame ms — avg: ${f(report.frame.avg)}, p50: ${f(report.frame.p50)}, p95: ${f(report.frame.p95)}, p99: ${f(report.frame.p99)}, min: ${f(report.frame.min)}, max: ${f(report.frame.max)}`,
+    `[perf] Terrain gen (${report.gen.count} chunks) — total: ${f(report.gen.total)}ms, avg: ${f(report.gen.avg)}ms, p95: ${f(report.gen.p95)}ms, max: ${f(report.gen.max)}ms`,
+    `[perf] Meshing (${report.mesh.count} cols) — total: ${f(report.mesh.total)}ms, avg: ${f(report.mesh.avg)}ms, p95: ${f(report.mesh.p95)}ms, max: ${f(report.mesh.max)}ms`,
+    `[perf] Scene: ${report.columns} columns, ${report.tris.toLocaleString()} tris, wall: ${f(report.wall / 1000)}s`,
+  ];
+  console.log(lines.join('\n'));
+
+  // Console: frame graph as ASCII sparkline (80 buckets)
+  const bucketCount = 80;
+  const bucketSize = Math.ceil(frameTimes.length / bucketCount);
+  const buckets = [];
+  for (let i = 0; i < bucketCount; i++) {
+    const slice = frameTimes.slice(i * bucketSize, (i + 1) * bucketSize);
+    if (slice.length === 0) break;
+    buckets.push(Math.max(...slice));
+  }
+  const maxBucket = Math.max(...buckets);
+  const bars = ' ▁▂▃▄▅▆▇█';
+  const sparkline = buckets.map(v => {
+    const idx = Math.min(bars.length - 1, Math.round((v / maxBucket) * (bars.length - 1)));
+    return bars[idx];
+  }).join('');
+  console.log(`[perf] Frame graph (max ${f(maxBucket)}ms):\n[perf] ${sparkline}`);
+
+  // Console: list spikes (frames > 2x the p95)
+  const spikeThreshold = report.frame.p95 * 2;
+  const spikes = [];
+  for (let i = 0; i < frameTimes.length; i++) {
+    if (frameTimes[i] > spikeThreshold) {
+      spikes.push({ frame: i, ms: frameTimes[i] });
+    }
+  }
+  if (spikes.length > 0) {
+    const top = spikes.sort((a, b) => b.ms - a.ms).slice(0, 10);
+    console.log(`[perf] Spikes (>${f(spikeThreshold)}ms): ${top.map(s => `frame ${s.frame}: ${f(s.ms)}ms`).join(', ')}`);
+  } else {
+    console.log(`[perf] No spikes above ${f(spikeThreshold)}ms`);
+  }
+}
+
+function drawFrameGraph(frameTimes, report) {
+  const canvas = document.createElement('canvas');
+  const W = 600, H = 180;
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.cssText = `
+    position: fixed; bottom: 20px; left: 20px; z-index: 100;
+    border: 1px solid rgba(127,204,129,0.3); border-radius: 6px;
+    background: rgba(0,0,0,0.85);
+  `;
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext('2d');
+  const pad = { top: 24, right: 12, bottom: 24, left: 48 };
+  const gw = W - pad.left - pad.right;
+  const gh = H - pad.top - pad.bottom;
+
+  // Cap Y axis at p99 * 1.5 so spikes don't squash everything
+  const yMax = Math.max(report.frame.p99 * 1.5, 20);
+
+  // Title
+  ctx.fillStyle = '#7fcc81';
+  ctx.font = '11px JetBrains Mono, monospace';
+  ctx.fillText('Frame Time (ms)', pad.left, 15);
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.fillText(`cap: ${yMax.toFixed(0)}ms`, W - 70, 15);
+
+  // Y axis labels + gridlines
+  const yTicks = [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
+  ctx.font = '9px JetBrains Mono, monospace';
+  for (const tick of yTicks) {
+    const y = pad.top + gh - (tick / yMax) * gh;
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y);
+    ctx.lineTo(W - pad.right, y);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillText(tick.toFixed(0), 4, y + 3);
+  }
+
+  // 16.67ms target line (60fps)
+  if (16.67 < yMax) {
+    const y60 = pad.top + gh - (16.67 / yMax) * gh;
+    ctx.strokeStyle = 'rgba(127,204,129,0.4)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.left, y60);
+    ctx.lineTo(W - pad.right, y60);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(127,204,129,0.5)';
+    ctx.fillText('60fps', W - pad.right - 30, y60 - 3);
+  }
+
+  // X axis label
+  ctx.fillStyle = 'rgba(255,255,255,0.3)';
+  ctx.fillText('0s', pad.left, H - 4);
+  ctx.fillText(`${(report.wall / 1000).toFixed(0)}s`, W - pad.right - 12, H - 4);
+
+  // Draw frame bars
+  const barW = Math.max(1, gw / frameTimes.length);
+  for (let i = 0; i < frameTimes.length; i++) {
+    const ms = frameTimes[i];
+    const barH = Math.min(gh, (ms / yMax) * gh);
+    const x = pad.left + (i / frameTimes.length) * gw;
+    const y = pad.top + gh - barH;
+
+    // Color: green < 16ms, yellow < p95, red >= p95
+    if (ms > report.frame.p95) {
+      ctx.fillStyle = ms > yMax ? '#ff4444' : '#e8834a';
+    } else if (ms > 16.67) {
+      ctx.fillStyle = '#c9a227';
+    } else {
+      ctx.fillStyle = '#7fcc81';
+    }
+    ctx.fillRect(x, y, Math.max(barW, 1), barH);
+  }
+}
+
 // ── Main ───────────────────────────────────────────
 async function main() {
   await init();
@@ -1290,6 +1606,61 @@ async function main() {
   document.getElementById('loading').classList.add('hidden');
   document.body.classList.add('ready');
 
+  // ── Perf test mode ──
+  if (PERF_MODE) {
+    // Hide interactive UI elements
+    for (const sel of ['.header', '.stats-panel', '.tech-badge', '.brush-toolbar',
+                        '.block-toolbar', '.crosshair']) {
+      const el = document.querySelector(sel);
+      if (el) el.style.display = 'none';
+    }
+
+    const perfHUD = createPerfHUD();
+    const flythrough = new PerfFlythrough(camera);
+    let lastTime = performance.now();
+
+    function perfAnimate() {
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      flythrough.update(dt);
+
+      const camPos = camera.position;
+      const cameraCX = Math.floor(camPos.x / CHUNK_SIZE);
+      const cameraCZ = Math.floor(camPos.z / CHUNK_SIZE);
+      material.uniforms.uCameraTarget.value.copy(camPos);
+
+      chunkManager.update(cameraCX, cameraCZ);
+
+      renderer.render(scene, camera);
+
+      const frameMs = performance.now() - now;
+      flythrough.recordFrame(frameMs);
+
+      updatePerfHUD(flythrough, chunkManager);
+
+      if (flythrough.done) {
+        // Final render pass to get accurate triangle count
+        renderer.render(scene, camera);
+        const report = flythrough.getReport(chunkManager, renderer);
+        showPerfReport(report, flythrough.frameTimes);
+
+        // Allow re-run with R key
+        window.addEventListener('keydown', (e) => {
+          if (e.code === 'KeyR') window.location.reload();
+        });
+        return;
+      }
+
+      requestAnimationFrame(perfAnimate);
+    }
+
+    requestAnimationFrame(perfAnimate);
+    return;
+  }
+
+  // ── Normal mode ──
   // FPS counter
   let fpsFrames = 0;
   let fpsLastUpdate = performance.now();

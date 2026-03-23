@@ -143,6 +143,56 @@ pub fn face_ao(
     ]
 }
 
+/// Same as `face_ao` but returns raw u8 values (0–3) without f32 conversion.
+/// Useful when the caller needs integer AO for comparison (e.g., greedy merge)
+/// and only converts to f32 at the end.
+pub fn face_ao_u8(
+    chunk: &Chunk,
+    neighbors: &ChunkNeighbors,
+    x: i32,
+    y: i32,
+    z: i32,
+    face: Face,
+) -> [u8; 4] {
+    let n = face.normal();
+    let (u_axis, v_axis) = face.tangent_axes();
+
+    let ox = x + n[0];
+    let oy = y + n[1];
+    let oz = z + n[2];
+
+    let mut u_dir = [0i32; 3];
+    let mut v_dir = [0i32; 3];
+    u_dir[u_axis] = 1;
+    v_dir[v_axis] = 1;
+
+    let sample = |du: i32, dv: i32| -> bool {
+        sample_block_opaque(
+            chunk,
+            neighbors,
+            ox + u_dir[0] * du + v_dir[0] * dv,
+            oy + u_dir[1] * du + v_dir[1] * dv,
+            oz + u_dir[2] * du + v_dir[2] * dv,
+        )
+    };
+
+    let neg_u = sample(-1, 0);
+    let pos_u = sample(1, 0);
+    let neg_v = sample(0, -1);
+    let pos_v = sample(0, 1);
+    let neg_u_neg_v = sample(-1, -1);
+    let pos_u_neg_v = sample(1, -1);
+    let pos_u_pos_v = sample(1, 1);
+    let neg_u_pos_v = sample(-1, 1);
+
+    [
+        vertex_ao(neg_u, neg_v, neg_u_neg_v),
+        vertex_ao(pos_u, neg_v, pos_u_neg_v),
+        vertex_ao(pos_u, pos_v, pos_u_pos_v),
+        vertex_ao(neg_u, pos_v, neg_u_pos_v),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

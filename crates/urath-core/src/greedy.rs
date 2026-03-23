@@ -1,4 +1,4 @@
-use crate::ao::{face_ao, sample_block_opaque};
+use crate::ao::{face_ao_u8, sample_block_opaque};
 use crate::chunk::{Chunk, ChunkNeighbors, Face};
 use crate::error::MeshError;
 use crate::mesh_output::MeshOutput;
@@ -81,8 +81,8 @@ impl Mesher for GreedyMesher {
                             let idx = u + v * size;
                             self.mask[idx] = block;
 
-                            // Compute AO as u8 values (0–3) for exact comparison
-                            let ao = face_ao(
+                            // Compute AO directly as u8 values (0–3) for exact comparison
+                            self.ao_mask[idx] = face_ao_u8(
                                 chunk,
                                 neighbors,
                                 pos[0] as i32,
@@ -90,12 +90,6 @@ impl Mesher for GreedyMesher {
                                 pos[2] as i32,
                                 face,
                             );
-                            self.ao_mask[idx] = [
-                                (ao[0] * 3.0).round() as u8,
-                                (ao[1] * 3.0).round() as u8,
-                                (ao[2] * 3.0).round() as u8,
-                                (ao[3] * 3.0).round() as u8,
-                            ];
                         }
                     }
                 }
@@ -194,9 +188,7 @@ impl Mesher for GreedyMesher {
 
 impl GreedyMesher {
     fn clear_mask(&mut self) {
-        for v in self.mask.iter_mut() {
-            *v = 0;
-        }
+        self.mask.fill(0);
         // ao_mask doesn't need clearing — only read where mask is nonzero
     }
 }

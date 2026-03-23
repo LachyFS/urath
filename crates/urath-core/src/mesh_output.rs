@@ -97,43 +97,39 @@ impl MeshOutput {
     ) {
         let base = self.vertex_count;
 
-        // Push 4 vertices
-        for i in 0..4 {
-            self.positions.push(positions[i][0]);
-            self.positions.push(positions[i][1]);
-            self.positions.push(positions[i][2]);
+        // Batch-write 4 vertices using extend_from_slice to avoid per-push capacity checks
+        self.positions.extend_from_slice(&[
+            positions[0][0], positions[0][1], positions[0][2],
+            positions[1][0], positions[1][1], positions[1][2],
+            positions[2][0], positions[2][1], positions[2][2],
+            positions[3][0], positions[3][1], positions[3][2],
+        ]);
 
-            self.normals.push(normal[0]);
-            self.normals.push(normal[1]);
-            self.normals.push(normal[2]);
+        self.normals.extend_from_slice(&[
+            normal[0], normal[1], normal[2],
+            normal[0], normal[1], normal[2],
+            normal[0], normal[1], normal[2],
+            normal[0], normal[1], normal[2],
+        ]);
 
-            self.ao.push(ao_values[i]);
-            self.block_ids.push(block_id);
+        self.ao.extend_from_slice(&ao_values);
+        self.block_ids.extend_from_slice(&[block_id, block_id, block_id, block_id]);
 
-            self.uvs.push(uvs[i][0]);
-            self.uvs.push(uvs[i][1]);
-        }
+        self.uvs.extend_from_slice(&[
+            uvs[0][0], uvs[0][1],
+            uvs[1][0], uvs[1][1],
+            uvs[2][0], uvs[2][1],
+            uvs[3][0], uvs[3][1],
+        ]);
 
         // AO-aware triangulation to fix anisotropy artifacts.
         // See: https://0fps.net/2013/07/03/ambient-occlusion-for-minecraft-like-worlds/
         if ao_values[0] + ao_values[2] > ao_values[1] + ao_values[3] {
             // Diagonal 0-2
-            self.indices.push(base);
-            self.indices.push(base + 1);
-            self.indices.push(base + 2);
-
-            self.indices.push(base);
-            self.indices.push(base + 2);
-            self.indices.push(base + 3);
+            self.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         } else {
             // Diagonal 1-3
-            self.indices.push(base + 1);
-            self.indices.push(base + 2);
-            self.indices.push(base + 3);
-
-            self.indices.push(base + 1);
-            self.indices.push(base + 3);
-            self.indices.push(base);
+            self.indices.extend_from_slice(&[base + 1, base + 2, base + 3, base + 1, base + 3, base]);
         }
 
         self.vertex_count += 4;
