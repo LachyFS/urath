@@ -157,29 +157,20 @@ impl SurfaceNetsMesher {
         }
     }
 
-    /// Compute smooth normal from density gradient at padded cell center.
-    /// Uses the center of the cell (offset by 0.5 in each axis from corner 0)
-    /// approximated by sampling at the padded corner position, clamped to valid range.
+    /// Compute smooth normal from density gradient.
+    /// Sample position is clamped to the valid interior of the padded buffer
+    /// so boundary cells get the gradient of the nearest interior position.
     #[inline]
-    fn gradient(&self, pi: usize, ps: usize) -> [f32; 3] {
+    fn gradient_at_cell(&self, cx: isize, cy: isize, cz: isize, ps: usize) -> [f32; 3] {
         let ps2 = ps * ps;
-        // Use forward differences at edges of the padded buffer
-        let max_idx = self.density.len() - 1;
-        let nx = if pi >= 1 && pi + 1 <= max_idx {
-            self.density[pi + 1] - self.density[pi - 1]
-        } else {
-            0.0
-        };
-        let ny = if pi >= ps && pi + ps <= max_idx {
-            self.density[pi + ps] - self.density[pi - ps]
-        } else {
-            0.0
-        };
-        let nz = if pi >= ps2 && pi + ps2 <= max_idx {
-            self.density[pi + ps2] - self.density[pi - ps2]
-        } else {
-            0.0
-        };
+        let px = (cx + 1).clamp(1, ps as isize - 2) as usize;
+        let py = (cy + 1).clamp(1, ps as isize - 2) as usize;
+        let pz = (cz + 1).clamp(1, ps as isize - 2) as usize;
+        let pi = px + py * ps + pz * ps2;
+
+        let nx = self.density[pi + 1] - self.density[pi - 1];
+        let ny = self.density[pi + ps] - self.density[pi - ps];
+        let nz = self.density[pi + ps2] - self.density[pi - ps2];
         let len = (nx * nx + ny * ny + nz * nz).sqrt();
         if len > 0.0 {
             [nx / len, ny / len, nz / len]
@@ -189,14 +180,15 @@ impl SurfaceNetsMesher {
     }
 
     /// Compute AO by counting solid neighbors in 3x3x3 neighborhood.
+    /// Sample position is clamped to the valid interior of the padded buffer.
     #[inline]
-    fn compute_ao(&self, pi: usize, ps: usize) -> f32 {
+    fn ao_at_cell(&self, cx: isize, cy: isize, cz: isize, ps: usize) -> f32 {
         let ps2 = ps * ps;
-        let max_idx = self.density.len() - 1;
-        // Skip AO computation if too close to buffer edges
-        if pi < ps2 + ps + 1 || pi + ps2 + ps + 1 > max_idx {
-            return 1.0;
-        }
+        let px = (cx + 1).clamp(1, ps as isize - 2) as usize;
+        let py = (cy + 1).clamp(1, ps as isize - 2) as usize;
+        let pz = (cz + 1).clamp(1, ps as isize - 2) as usize;
+        let pi = px + py * ps + pz * ps2;
+
         let mut solid = 0u32;
         for dz in [-(ps2 as isize), 0, ps2 as isize] {
             for dy in [-(ps as isize), 0, ps as isize] {
@@ -302,8 +294,8 @@ impl Mesher for SurfaceNetsMesher {
                     let vy = cy as f32 + avg[1] * inv;
                     let vz = cz as f32 + avg[2] * inv;
 
-                    let normal = self.gradient(p0, ps);
-                    let ao = self.compute_ao(p0, ps);
+                    let normal = self.gradient_at_cell(cx, cy, cz, ps);
+                    let ao = self.ao_at_cell(cx, cy, cz, ps);
 
                     // Material: first solid corner's block ID
                     let mut material = 0u16;
