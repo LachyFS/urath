@@ -134,6 +134,33 @@ impl MeshOutput {
 
         self.vertex_count += 4;
     }
+
+    /// Append a single vertex and return its index.
+    /// Used by meshers that share vertices between faces (e.g., Surface Nets).
+    #[inline]
+    pub fn push_vertex(
+        &mut self,
+        position: [f32; 3],
+        normal: [f32; 3],
+        ao_value: f32,
+        block_id: u16,
+        uv: [f32; 2],
+    ) -> u32 {
+        let idx = self.vertex_count;
+        self.positions.extend_from_slice(&position);
+        self.normals.extend_from_slice(&normal);
+        self.ao.push(ao_value);
+        self.block_ids.push(block_id);
+        self.uvs.extend_from_slice(&uv);
+        self.vertex_count += 1;
+        idx
+    }
+
+    /// Append a triangle from 3 pre-existing vertex indices.
+    #[inline]
+    pub fn push_triangle(&mut self, a: u32, b: u32, c: u32) {
+        self.indices.extend_from_slice(&[a, b, c]);
+    }
 }
 
 impl Default for MeshOutput {

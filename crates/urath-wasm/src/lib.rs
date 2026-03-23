@@ -1,7 +1,8 @@
 use wasm_bindgen::prelude::*;
 
 use urath::{
-    ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher, TerrainConfig, TerrainGenerator,
+    ChunkNeighbors, Face, GreedyMesher, MeshOutput, Mesher, SurfaceNetsMesher, TerrainConfig,
+    TerrainGenerator,
 };
 
 /// WASM-exposed chunk that holds voxel data.
@@ -183,6 +184,46 @@ impl WasmGreedyMesher {
     }
 
     /// Mesh a chunk with neighbor data for cross-chunk face culling.
+    pub fn mesh_with_neighbors(
+        &mut self,
+        chunk: &WasmChunk,
+        neighbors: &WasmChunkNeighbors,
+    ) -> Result<WasmMeshResult, JsError> {
+        let mut output = MeshOutput::with_capacity(4096);
+        self.inner
+            .mesh(&chunk.inner, &neighbors.inner, &mut output)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(WasmMeshResult { output })
+    }
+}
+
+/// WASM-exposed Surface Nets mesher for smooth terrain.
+#[wasm_bindgen]
+pub struct WasmSurfaceNetsMesher {
+    inner: SurfaceNetsMesher,
+}
+
+#[wasm_bindgen]
+impl WasmSurfaceNetsMesher {
+    /// Create a new Surface Nets mesher for a given chunk size.
+    #[wasm_bindgen(constructor)]
+    pub fn new(chunk_size: usize) -> WasmSurfaceNetsMesher {
+        Self {
+            inner: SurfaceNetsMesher::with_chunk_size(chunk_size),
+        }
+    }
+
+    /// Mesh a chunk without neighbor data.
+    pub fn mesh(&mut self, chunk: &WasmChunk) -> Result<WasmMeshResult, JsError> {
+        let neighbors = ChunkNeighbors::empty(chunk.inner.size());
+        let mut output = MeshOutput::with_capacity(4096);
+        self.inner
+            .mesh(&chunk.inner, &neighbors, &mut output)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(WasmMeshResult { output })
+    }
+
+    /// Mesh a chunk with neighbor data for cross-chunk surface continuity.
     pub fn mesh_with_neighbors(
         &mut self,
         chunk: &WasmChunk,

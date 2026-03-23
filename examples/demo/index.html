@@ -400,7 +400,7 @@
 <div class="overlay header">
   <h1>urath</h1>
   <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
-  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · ESC menu</p>
+  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · M smooth · ESC menu</p>
 </div>
 
 <div class="overlay stats-panel">
@@ -471,7 +471,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher, WasmTerrainGenerator } from './pkg/urath_wasm.js';
+import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher, WasmSurfaceNetsMesher, WasmTerrainGenerator } from './pkg/urath_wasm.js';
 
 // Face direction constants matching Rust Face enum
 const FACE_POS_X = 0;
@@ -599,6 +599,7 @@ function createTerrainMaterial(textureArray) {
       uniform sampler2DArray uTextureArray;
       uniform vec3 uCameraTarget;
       uniform bool uWireframe;
+      uniform bool uSmoothMode;
 
       in float vAo;
       in float vBlockId;
@@ -630,6 +631,17 @@ function createTerrainMaterial(textureArray) {
         return 0;
       }
 
+      // Triplanar texture sampling for smooth meshes
+      vec3 triplanarSample(vec3 wp, vec3 n, int layer) {
+        vec3 blend = abs(n);
+        blend = max(blend, 0.00001);
+        blend /= (blend.x + blend.y + blend.z);
+        vec3 xc = texture(uTextureArray, vec3(fract(wp.yz), float(layer))).rgb;
+        vec3 yc = texture(uTextureArray, vec3(fract(wp.xz), float(layer))).rgb;
+        vec3 zc = texture(uTextureArray, vec3(fract(wp.xy), float(layer))).rgb;
+        return xc * blend.x + yc * blend.y + zc * blend.z;
+      }
+
       void main() {
         int bid = int(vBlockId + 0.5);
 
@@ -642,9 +654,14 @@ function createTerrainMaterial(textureArray) {
 
         int layer = getTextureLayer(bid, faceType);
 
-        // Sample texture with tiling UVs (fract handles repeating)
-        vec2 tilingUv = fract(vUv);
-        vec3 color = texture(uTextureArray, vec3(tilingUv, float(layer))).rgb;
+        // Sample texture: triplanar for smooth, tiling UVs for greedy
+        vec3 color;
+        if (uSmoothMode) {
+          color = triplanarSample(vWorldPos, n, layer);
+        } else {
+          vec2 tilingUv = fract(vUv);
+          color = texture(uTextureArray, vec3(tilingUv, float(layer))).rgb;
+        }
 
         // Lighting
         vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
@@ -679,8 +696,9 @@ function createTerrainMaterial(textureArray) {
       uCameraTarget: { value: new THREE.Vector3() },
       uTextureArray: { value: textureArray },
       uWireframe: { value: false },
+      uSmoothMode: { value: false },
     },
-    side: THREE.FrontSide,
+    side: THREE.DoubleSide,
   });
 }
 
@@ -1475,10 +1493,41 @@ async function main() {
   const { renderer, scene, camera, controls } = createScene(container);
 
   const material = createTerrainMaterial(textureArray);
-  const mesher = new WasmGreedyMesher(CHUNK_SIZE);
+  const greedyMesher = new WasmGreedyMesher(CHUNK_SIZE);
+  const smoothMesher = new WasmSurfaceNetsMesher(CHUNK_SIZE);
+  let mesherMode = 'greedy'; // 'greedy' or 'smooth'
   const terrainGen = new WasmTerrainGenerator();
-  const chunkManager = new ChunkManager(scene, material, mesher, terrainGen);
+  const chunkManager = new ChunkManager(scene, material, greedyMesher, terrainGen);
   const mover = new KeyboardMover(camera);
+
+  // Queue for gradual remesh when toggling mesher mode
+  let remeshQueue = [];
+
+  function toggleMesherMode() {
+    if (mesherMode === 'greedy') {
+      mesherMode = 'smooth';
+      chunkManager.mesher = smoothMesher;
+      material.uniforms.uSmoothMode.value = true;
+    } else {
+      mesherMode = 'greedy';
+      chunkManager.mesher = greedyMesher;
+      material.uniforms.uSmoothMode.value = false;
+    }
+    // Queue all loaded columns for gradual remesh (3 per frame)
+    remeshQueue = [];
+    for (const [ck] of chunkManager.columnMeshes) {
+      remeshQueue.push(ck);
+    }
+  }
+
+  function processRemeshQueue() {
+    const batch = Math.min(3, remeshQueue.length);
+    for (let i = 0; i < batch; i++) {
+      const ck = remeshQueue.shift();
+      const [cx, cz] = ck.split(',').map(Number);
+      chunkManager._meshColumn(cx, cz);
+    }
+  }
 
   // ── Editing state ──
   let selectedBlockId = BLOCK_STONE;
@@ -1558,6 +1607,9 @@ async function main() {
     } else if (e.code === 'KeyF') {
       material.wireframe = !material.wireframe;
       material.uniforms.uWireframe.value = material.wireframe;
+      document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
+    } else if (e.code === 'KeyM') {
+      toggleMesherMode();
       document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
     } else if (e.key === '[') {
       brushRadius = Math.max(1, brushRadius - 1);
@@ -1691,6 +1743,11 @@ async function main() {
       chunkManager.update(cameraCX, cameraCZ);
       lastCameraCX = cameraCX;
       lastCameraCZ = cameraCZ;
+    }
+
+    // Process gradual remesh queue (mesher mode toggle)
+    if (remeshQueue.length > 0) {
+      processRemeshQueue();
     }
 
     // Hover highlight (always from screen center in first person)
