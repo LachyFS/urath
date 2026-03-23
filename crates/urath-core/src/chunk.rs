@@ -293,6 +293,12 @@ impl ChunkNeighbors {
     pub fn has_face(&self, face: Face) -> bool {
         self.faces[face as usize].is_some()
     }
+
+    /// Direct slice access to a face's border data, if set.
+    #[inline]
+    pub fn border_slice(&self, face: Face) -> Option<&[u16]> {
+        self.faces[face as usize].as_deref()
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-use crate::ao::{face_ao_u8, sample_block_opaque};
+use crate::ao::vertex_ao;
 use crate::chunk::{Chunk, ChunkNeighbors, Face};
 use crate::error::MeshError;
 use crate::mesh_output::MeshOutput;
@@ -18,6 +18,9 @@ pub struct GreedyMesher {
     /// Scratch buffer for AO values per face in one slice.
     /// Stored as `[u8; 4]` (0–3 per vertex) for exact equality comparison during merge.
     ao_mask: Vec<[u8; 4]>,
+    /// Padded (size+2)³ opacity buffer for branchless neighbor lookups.
+    /// Built once per mesh() call from chunk data + neighbor borders.
+    opaque: Vec<u8>,
     /// The chunk size this mesher is configured for.
     chunk_size: usize,
 }
@@ -31,10 +34,98 @@ impl GreedyMesher {
     /// Create a new greedy mesher for a specific chunk size.
     pub fn with_chunk_size(size: usize) -> Self {
         let area = size * size;
+        let ps = size + 2;
         Self {
             mask: vec![0u16; area],
             ao_mask: vec![[0u8; 4]; area],
+            opaque: vec![0u8; ps * ps * ps],
             chunk_size: size,
+        }
+    }
+
+    /// Build the padded opacity buffer from chunk data and neighbor borders.
+    /// The buffer has 1-cell padding on all sides so that all neighbor lookups
+    /// (including AO diagonal samples) are simple array accesses with no bounds checks.
+    fn build_opaque(&mut self, chunk: &Chunk, neighbors: &ChunkNeighbors) {
+        let s = self.chunk_size;
+        let ps = s + 2;
+        let ps2 = ps * ps;
+
+        self.opaque.fill(0);
+
+        // Fill interior from chunk blocks
+        let blocks = chunk.blocks();
+        for z in 0..s {
+            for y in 0..s {
+                let chunk_row = y * s + z * s * s;
+                let pad_row = (y + 1) * ps + (z + 1) * ps2;
+                for x in 0..s {
+                    if blocks[chunk_row + x] != 0 {
+                        self.opaque[pad_row + x + 1] = 1;
+                    }
+                }
+            }
+        }
+
+        // Fill borders from neighbors.
+        // Border indexing conventions match extract_border/get_border_block:
+        //   PosX/NegX: [z + y * s]
+        //   PosY/NegY: [x + z * s]
+        //   PosZ/NegZ: [x + y * s]
+
+        if let Some(data) = neighbors.border_slice(Face::NegX) {
+            for y in 0..s {
+                for z in 0..s {
+                    if data[z + y * s] != 0 {
+                        self.opaque[(y + 1) * ps + (z + 1) * ps2] = 1;
+                    }
+                }
+            }
+        }
+        if let Some(data) = neighbors.border_slice(Face::PosX) {
+            for y in 0..s {
+                for z in 0..s {
+                    if data[z + y * s] != 0 {
+                        self.opaque[(s + 1) + (y + 1) * ps + (z + 1) * ps2] = 1;
+                    }
+                }
+            }
+        }
+        if let Some(data) = neighbors.border_slice(Face::NegY) {
+            for z in 0..s {
+                for x in 0..s {
+                    if data[x + z * s] != 0 {
+                        self.opaque[(x + 1) + (z + 1) * ps2] = 1;
+                    }
+                }
+            }
+        }
+        if let Some(data) = neighbors.border_slice(Face::PosY) {
+            for z in 0..s {
+                for x in 0..s {
+                    if data[x + z * s] != 0 {
+                        self.opaque[(x + 1) + (s + 1) * ps + (z + 1) * ps2] = 1;
+                    }
+                }
+            }
+        }
+        if let Some(data) = neighbors.border_slice(Face::NegZ) {
+            for y in 0..s {
+                for x in 0..s {
+                    if data[x + y * s] != 0 {
+                        self.opaque[(x + 1) + (y + 1) * ps] = 1;
+                    }
+                }
+            }
+        }
+        if let Some(data) = neighbors.border_slice(Face::PosZ) {
+            for y in 0..s {
+                for x in 0..s {
+                    if data[x + y * s] != 0 {
+                        self.opaque[(x + 1) + (y + 1) * ps + (s + 1) * ps2] = 1;
+                    }
+                }
+            }
         }
     }
 }
@@ -55,41 +146,90 @@ impl Mesher for GreedyMesher {
         let size = chunk.size();
         debug_assert_eq!(size, self.chunk_size, "chunk size mismatch with mesher");
 
+        // Build padded opacity buffer once for the entire mesh
+        self.build_opaque(chunk, neighbors);
+
+        let blocks = chunk.blocks();
+        let ps = size + 2;
+        let ps2 = ps * ps;
+
+        // Pre-computed strides for chunk and padded buffer indexing
+        let chunk_strides: [usize; 3] = [1, size, size * size];
+        let pad_strides: [usize; 3] = [1, ps, ps2];
+        // Padded index of chunk coordinate (0,0,0)
+        let pad_origin = 1 + ps + ps2;
+
         for &face in &Face::ALL {
-            let normal = face.normal();
+            // Pre-compute all per-face values (hoisted out of O(n³) inner loops)
+            let (u_axis, v_axis) = face.tangent_axes();
+            let n_axis = face.normal_axis();
+            let normal_f32 = face.normal_f32();
+            let is_positive = face.is_positive();
+            let swap_uv = u_axis == 1;
+
+            // Chunk buffer strides for face-local (u, v, d) iteration
+            let u_cstride = chunk_strides[u_axis];
+            let v_cstride = chunk_strides[v_axis];
+            let n_cstride = chunk_strides[n_axis];
+
+            // Padded buffer strides
+            let u_pstride = pad_strides[u_axis];
+            let v_pstride = pad_strides[v_axis];
+            let n_pstride = pad_strides[n_axis];
+
+            // Signed normal offset in padded buffer
+            let n_poffset: isize = if is_positive {
+                n_pstride as isize
+            } else {
+                -(n_pstride as isize)
+            };
+
+            let depth_add: f32 = if is_positive { 1.0 } else { 0.0 };
 
             for d in 0..size {
                 // === Pass 1: Build face mask for this slice ===
-                self.clear_mask();
+                self.mask.fill(0);
+
+                let d_chunk_base = d * n_cstride;
+                let d_pad_base = pad_origin + d * n_pstride;
 
                 for v in 0..size {
+                    let dv_chunk = d_chunk_base + v * v_cstride;
+                    let dv_pad = d_pad_base + v * v_pstride;
+
                     for u in 0..size {
-                        let pos = compose_coords(u, v, d, face, size);
-                        let block = chunk.get(pos[0], pos[1], pos[2]);
+                        let chunk_idx = dv_chunk + u * u_cstride;
+                        let block = blocks[chunk_idx];
                         if block == 0 {
                             continue;
                         }
 
-                        // Check the neighbor in the face's normal direction
-                        let nx = pos[0] as i32 + normal[0];
-                        let ny = pos[1] as i32 + normal[1];
-                        let nz = pos[2] as i32 + normal[2];
-
-                        let neighbor_opaque = sample_block_opaque(chunk, neighbors, nx, ny, nz);
+                        // Face culling: single array lookup (no branches!)
+                        let pad_idx = dv_pad + u * u_pstride;
+                        let neighbor_opaque =
+                            self.opaque[(pad_idx as isize + n_poffset) as usize] != 0;
 
                         if !neighbor_opaque {
-                            let idx = u + v * size;
-                            self.mask[idx] = block;
+                            let mask_idx = u + v * size;
+                            self.mask[mask_idx] = block;
 
-                            // Compute AO directly as u8 values (0–3) for exact comparison
-                            self.ao_mask[idx] = face_ao_u8(
-                                chunk,
-                                neighbors,
-                                pos[0] as i32,
-                                pos[1] as i32,
-                                pos[2] as i32,
-                                face,
-                            );
+                            // AO: 8 direct array lookups (no function calls, no branches)
+                            let center = (pad_idx as isize + n_poffset) as usize;
+                            let s_neg_u = self.opaque[center - u_pstride] != 0;
+                            let s_pos_u = self.opaque[center + u_pstride] != 0;
+                            let s_neg_v = self.opaque[center - v_pstride] != 0;
+                            let s_pos_v = self.opaque[center + v_pstride] != 0;
+                            let s_nu_nv = self.opaque[center - u_pstride - v_pstride] != 0;
+                            let s_pu_nv = self.opaque[center + u_pstride - v_pstride] != 0;
+                            let s_pu_pv = self.opaque[center + u_pstride + v_pstride] != 0;
+                            let s_nu_pv = self.opaque[center - u_pstride + v_pstride] != 0;
+
+                            self.ao_mask[mask_idx] = [
+                                vertex_ao(s_neg_u, s_neg_v, s_nu_nv),
+                                vertex_ao(s_pos_u, s_neg_v, s_pu_nv),
+                                vertex_ao(s_pos_u, s_pos_v, s_pu_pv),
+                                vertex_ao(s_neg_u, s_pos_v, s_nu_pv),
+                            ];
                         }
                     }
                 }
@@ -111,7 +251,9 @@ impl Mesher for GreedyMesher {
                         let mut w = 1;
                         while u + w < size {
                             let next_idx = (u + w) + v * size;
-                            if self.mask[next_idx] != block_id || self.ao_mask[next_idx] != ao_val {
+                            if self.mask[next_idx] != block_id
+                                || self.ao_mask[next_idx] != ao_val
+                            {
                                 break;
                             }
                             w += 1;
@@ -131,48 +273,51 @@ impl Mesher for GreedyMesher {
                             h += 1;
                         }
 
-                        // Compute quad positions
-                        let positions = quad_positions(u, v, d, w, h, face);
+                        // Compute quad positions using pre-computed axes
+                        let depth = d as f32 + depth_add;
+                        let u0 = u as f32;
+                        let v0 = v as f32;
+                        let u1 = (u + w) as f32;
+                        let v1 = (v + h) as f32;
 
-                        // Tiling UVs: a W×H merged quad tiles the texture W×H times.
-                        // For side faces where u_axis is Y (PosX, NegZ), swap UV
-                        // so texture horizontal maps to a horizontal world axis
-                        // and texture vertical maps to Y (world up).
+                        let mut positions = [[0.0f32; 3]; 4];
+                        positions[0][u_axis] = u0;
+                        positions[0][v_axis] = v0;
+                        positions[0][n_axis] = depth;
+                        positions[1][u_axis] = u1;
+                        positions[1][v_axis] = v0;
+                        positions[1][n_axis] = depth;
+                        positions[2][u_axis] = u1;
+                        positions[2][v_axis] = v1;
+                        positions[2][n_axis] = depth;
+                        positions[3][u_axis] = u0;
+                        positions[3][v_axis] = v1;
+                        positions[3][n_axis] = depth;
+
+                        // Tiling UVs
                         let wf = w as f32;
                         let hf = h as f32;
-                        let (u_axis, _) = face.tangent_axes();
-                        let uvs = if u_axis == 1 {
-                            // u_axis is Y — swap so tex_v tracks Y
-                            [
-                                [0.0, 0.0], // v0
-                                [0.0, wf],  // v1: moved along Y → tex V
-                                [hf, wf],   // v2
-                                [hf, 0.0],  // v3: moved along horiz → tex U
-                            ]
+                        let uvs = if swap_uv {
+                            [[0.0, 0.0], [0.0, wf], [hf, wf], [hf, 0.0]]
                         } else {
-                            [
-                                [0.0, 0.0], // v0
-                                [wf, 0.0],  // v1
-                                [wf, hf],   // v2
-                                [0.0, hf],  // v3
-                            ]
+                            [[0.0, 0.0], [wf, 0.0], [wf, hf], [0.0, hf]]
                         };
 
-                        // Convert AO from u8 (0–3) back to f32 (0.0–1.0)
+                        // Convert AO from u8 (0–3) to f32 (0.0–1.0)
+                        const AO_SCALE: f32 = 1.0 / 3.0;
                         let ao_f32 = [
-                            ao_val[0] as f32 / 3.0,
-                            ao_val[1] as f32 / 3.0,
-                            ao_val[2] as f32 / 3.0,
-                            ao_val[3] as f32 / 3.0,
+                            ao_val[0] as f32 * AO_SCALE,
+                            ao_val[1] as f32 * AO_SCALE,
+                            ao_val[2] as f32 * AO_SCALE,
+                            ao_val[3] as f32 * AO_SCALE,
                         ];
 
-                        output.push_quad(&positions, face.normal_f32(), ao_f32, block_id, &uvs);
+                        output.push_quad(&positions, normal_f32, ao_f32, block_id, &uvs);
 
                         // Zero out the merged region in the mask
                         for dv in 0..h {
                             for du in 0..w {
-                                let clear_idx = (u + du) + (v + dv) * size;
-                                self.mask[clear_idx] = 0;
+                                self.mask[(u + du) + (v + dv) * size] = 0;
                             }
                         }
 
@@ -186,15 +331,8 @@ impl Mesher for GreedyMesher {
     }
 }
 
-impl GreedyMesher {
-    fn clear_mask(&mut self) {
-        self.mask.fill(0);
-        // ao_mask doesn't need clearing — only read where mask is nonzero
-    }
-}
-
 /// Map face-local 2D coordinates (u, v) and slice depth d to 3D chunk coordinates.
-#[inline]
+#[cfg(test)]
 fn compose_coords(u: usize, v: usize, d: usize, face: Face, _size: usize) -> [usize; 3] {
     let (u_axis, v_axis) = face.tangent_axes();
     let n_axis = face.normal_axis();
@@ -206,17 +344,7 @@ fn compose_coords(u: usize, v: usize, d: usize, face: Face, _size: usize) -> [us
 }
 
 /// Compute the 4 corner positions of a merged quad.
-///
-/// The quad spans from `(u, v)` to `(u+w, v+h)` in face-local coordinates,
-/// at depth `d`. The quad is offset by +1 in the normal direction for positive
-/// faces (so it sits on the outside surface of the block).
-///
-/// Vertex ordering:
-/// - v0: (u, v)       — bottom-left
-/// - v1: (u+w, v)     — bottom-right
-/// - v2: (u+w, v+h)   — top-right
-/// - v3: (u, v+h)     — top-left
-#[inline]
+#[cfg(test)]
 fn quad_positions(u: usize, v: usize, d: usize, w: usize, h: usize, face: Face) -> [[f32; 3]; 4] {
     let (u_axis, v_axis) = face.tangent_axes();
     let n_axis = face.normal_axis();
@@ -315,24 +443,6 @@ mod tests {
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
         let output = mesh_chunk(&chunk, &neighbors);
 
-        // Two adjacent blocks along X: the shared face (+X of block0 / -X of block1) is culled.
-        // Remaining: 10 faces. Some will merge (e.g., top, bottom, front, back are 2x1).
-        // After greedy merge:
-        // - PosX: 1 quad (1x1 on block at x=1)
-        // - NegX: 1 quad (1x1 on block at x=0)
-        // - PosY: 1 quad (2x1 merged)
-        // - NegY: 1 quad (2x1 merged)
-        // - PosZ: 1 quad (2x1 merged)
-        // - NegZ: 1 quad (2x1 merged)
-        // Total: 6 quads (some faces merge, some don't, but all 10 faces reduce to 6 quads
-        // because the 4 side faces each merge the 2 blocks into 1 quad)
-        // Wait — the blocks are adjacent along X. For PosY face:
-        //   face tangent_axes = (X, Z). Both blocks at (0,0,0) and (1,0,0) have +Y exposed.
-        //   They are adjacent in u (X) direction, same block_id, same AO → merge into 1 quad.
-        // Similarly for NegY, PosZ, NegZ.
-        // PosX: only block at x=1 has +X exposed → 1 quad
-        // NegX: only block at x=0 has -X exposed → 1 quad
-        // Total: 6 quads
         assert_eq!(output.vertex_count(), 24);
         assert_eq!(output.index_count(), 36);
     }
@@ -345,15 +455,7 @@ mod tests {
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
         let output = mesh_chunk(&chunk, &neighbors);
 
-        // The shared face is still culled (both are solid).
-        // But top/bottom/front/back faces can NOT merge across different block IDs.
-        // PosX: 1 quad (block 2)
-        // NegX: 1 quad (block 1)
-        // PosY: 2 quads (block 1 and block 2 can't merge)
-        // NegY: 2 quads
-        // PosZ: 2 quads
-        // NegZ: 2 quads
-        // Total: 10 quads
+        // 10 quads (shared face culled but can't merge across different IDs)
         assert_eq!(output.vertex_count(), 40); // 10 × 4
         assert_eq!(output.index_count(), 60); // 10 × 6
     }
@@ -411,8 +513,6 @@ mod tests {
         mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
 
         // Each face is 1x1, no merging possible in a checkerboard
-        // (neighbors in the face plane always differ or have different AO)
-        // The vertex count should be expected_faces * 4
         assert_eq!(output.vertex_count(), expected_faces * 4);
     }
 
@@ -454,24 +554,13 @@ mod tests {
         let mut output = MeshOutput::new();
         mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
 
-        // Should have geometry (not empty)
         assert!(!output.is_empty());
-
-        // After greedy merge:
-        // +Y: 1 quad (4x4 at y=2)
-        // -Y: 1 quad (4x4 at y=0)
-        // +X: 1 quad (4x2 at x=4)  — actually x boundary, 4 wide in Z, 2 tall in Y
-        // -X: 1 quad (4x2 at x=0)
-        // +Z: 1 quad (4x2 at z=4)
-        // -Z: 1 quad (4x2 at z=0)
-        // Total: 6 quads
         assert_eq!(output.vertex_count(), 24);
         assert_eq!(output.index_count(), 36);
     }
 
     #[test]
     fn compose_coords_roundtrip() {
-        // Verify compose_coords produces valid coordinates for all faces
         let size = 8;
         for face in &Face::ALL {
             for d in 0..size {
@@ -489,25 +578,17 @@ mod tests {
 
     #[test]
     fn quad_positions_positive_face() {
-        // PosX face at d=5, u=2, v=3, w=4, h=2
-        // PosX: u_axis=1(Y), v_axis=2(Z), n_axis=0(X)
         let positions = quad_positions(2, 3, 5, 4, 2, Face::PosX);
-
-        // Depth should be d+1 = 6 (positive face)
         assert_eq!(positions[0][0], 6.0); // X = depth
         assert_eq!(positions[0][1], 2.0); // Y = u
         assert_eq!(positions[0][2], 3.0); // Z = v
-
         assert_eq!(positions[2][1], 6.0); // Y = u + w
         assert_eq!(positions[2][2], 5.0); // Z = v + h
     }
 
     #[test]
     fn quad_positions_negative_face() {
-        // NegX face at d=5
         let positions = quad_positions(0, 0, 5, 1, 1, Face::NegX);
-
-        // Depth should be d = 5 (negative face, no +1 offset)
         assert_eq!(positions[0][0], 5.0);
     }
 }
