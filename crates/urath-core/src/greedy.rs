@@ -146,6 +146,17 @@ impl Mesher for GreedyMesher {
         let size = chunk.size();
         debug_assert_eq!(size, self.chunk_size, "chunk size mismatch with mesher");
 
+        // Skip entirely empty chunks (no non-air blocks → no faces to emit)
+        if chunk.is_empty() {
+            return Ok(());
+        }
+
+        // Skip fully solid chunks where all neighbors are also solid
+        // (no air boundary → no visible faces)
+        if chunk.is_solid() && neighbors.all_borders_opaque() {
+            return Ok(());
+        }
+
         // Build padded opacity buffer once for the entire mesh
         self.build_opaque(chunk, neighbors);
 
@@ -251,9 +262,7 @@ impl Mesher for GreedyMesher {
                         let mut w = 1;
                         while u + w < size {
                             let next_idx = (u + w) + v * size;
-                            if self.mask[next_idx] != block_id
-                                || self.ao_mask[next_idx] != ao_val
-                            {
+                            if self.mask[next_idx] != block_id || self.ao_mask[next_idx] != ao_val {
                                 break;
                             }
                             w += 1;

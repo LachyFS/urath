@@ -400,7 +400,7 @@
 <div class="overlay header">
   <h1>urath</h1>
   <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
-  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · M smooth · ESC menu</p>
+  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · M smooth · T blend · ESC menu</p>
 </div>
 
 <div class="overlay stats-panel">
@@ -600,6 +600,7 @@ function createTerrainMaterial(textureArray) {
       uniform vec3 uCameraTarget;
       uniform bool uWireframe;
       uniform bool uSmoothMode;
+      uniform bool uBlendTextures;
 
       in float vAo;
       in float vBlockId;
@@ -642,6 +643,17 @@ function createTerrainMaterial(textureArray) {
         return xc * blend.x + yc * blend.y + zc * blend.z;
       }
 
+      // Get a secondary blending layer based on slope and height context.
+      // Steep slopes show dirt/stone, flat tops show grass, low areas show sand, etc.
+      int getBlendLayer(int bid, float slopeY, float wy) {
+        // Steep surfaces: blend toward dirt/stone
+        if (bid == 3 && slopeY < 0.7) return 1;    // grass → dirt on slopes
+        if (bid == 6 && slopeY < 0.7) return 0;    // snow → stone on slopes
+        if (bid == 4 && slopeY > 0.8) return 2;    // sand → grass_top on flat
+        if (bid == 2 && slopeY > 0.9) return 3;    // dirt → grass_side bleed
+        return -1; // no blend
+      }
+
       void main() {
         int bid = int(vBlockId + 0.5);
 
@@ -658,6 +670,29 @@ function createTerrainMaterial(textureArray) {
         vec3 color;
         if (uSmoothMode) {
           color = triplanarSample(vWorldPos, n, layer);
+
+          // Texture blending: blend between block textures based on slope/height
+          if (uBlendTextures) {
+            int blendLayer = getBlendLayer(bid, n.y, vWorldPos.y);
+            if (blendLayer >= 0) {
+              vec3 blendColor = triplanarSample(vWorldPos, n, blendLayer);
+              // Blend amount based on how steep/flat the surface is
+              float slopeFactor = 1.0 - abs(n.y);  // 0 on flat, 1 on vertical
+              // For grass→dirt: blend more on steeper slopes
+              float blendAmount;
+              if (bid == 3) {
+                blendAmount = smoothstep(0.3, 0.7, slopeFactor); // grass→dirt
+              } else if (bid == 6) {
+                blendAmount = smoothstep(0.3, 0.7, slopeFactor); // snow→stone
+              } else {
+                blendAmount = smoothstep(0.5, 0.8, 1.0 - slopeFactor); // flat blends
+              }
+              // Add noise to break up the transition
+              float noise = fract(sin(dot(vWorldPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
+              blendAmount = clamp(blendAmount + (noise - 0.5) * 0.2, 0.0, 1.0);
+              color = mix(color, blendColor, blendAmount);
+            }
+          }
         } else {
           vec2 tilingUv = fract(vUv);
           color = texture(uTextureArray, vec3(tilingUv, float(layer))).rgb;
@@ -697,6 +732,7 @@ function createTerrainMaterial(textureArray) {
       uTextureArray: { value: textureArray },
       uWireframe: { value: false },
       uSmoothMode: { value: false },
+      uBlendTextures: { value: false },
     },
     side: THREE.DoubleSide,
   });
@@ -947,11 +983,12 @@ class ChunkManager {
       const p = s.positions;
       const base3 = vOff * 3;
 
-      // Copy positions with Y offset
-      for (let i = 0; i < p.length; i += 3) {
-        positions[base3 + i]     = p[i];
-        positions[base3 + i + 1] = p[i + 1] + yOffset;
-        positions[base3 + i + 2] = p[i + 2];
+      // Copy positions, then fixup Y with offset
+      positions.set(p, base3);
+      if (yOffset !== 0) {
+        for (let i = 1; i < p.length; i += 3) {
+          positions[base3 + i] += yOffset;
+        }
       }
 
       normals.set(s.normals, base3);
@@ -1610,7 +1647,10 @@ async function main() {
       document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
     } else if (e.code === 'KeyM') {
       toggleMesherMode();
-      document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
+    } else if (e.code === 'KeyT') {
+      if (mesherMode === 'smooth') {
+        material.uniforms.uBlendTextures.value = !material.uniforms.uBlendTextures.value;
+      }
     } else if (e.key === '[') {
       brushRadius = Math.max(1, brushRadius - 1);
       updateBrushUI();

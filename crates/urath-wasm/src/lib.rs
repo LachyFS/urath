@@ -138,12 +138,8 @@ impl WasmMeshResult {
 
     /// Copy block IDs into a Float32Array (cast from u16 for use as vertex attribute).
     pub fn block_ids(&self) -> js_sys::Float32Array {
-        let len = self.output.block_ids.len();
-        let arr = js_sys::Float32Array::new_with_length(len as u32);
-        for (i, &id) in self.output.block_ids.iter().enumerate() {
-            arr.set_index(i as u32, id as f32);
-        }
-        arr
+        let f32_vec: Vec<f32> = self.output.block_ids.iter().map(|&id| id as f32).collect();
+        js_sys::Float32Array::from(&f32_vec[..])
     }
 
     /// Copy UV coordinates into a new Float32Array (2 floats per vertex).

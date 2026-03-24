@@ -11,6 +11,8 @@ use crate::mesher::Mesher;
 pub struct SurfaceNetsMesher {
     /// Padded density: (size+2)³. Negative = solid, positive = air.
     density: Vec<f32>,
+    /// Scratch buffer for density smoothing pass.
+    density_scratch: Vec<f32>,
     /// Padded materials: (size+2)³.
     materials: Vec<u16>,
     /// Vertex index per cell: size³. `u32::MAX` = no vertex.
@@ -22,9 +24,18 @@ const NO_VERTEX: u32 = u32::MAX;
 
 /// The 12 edges of a unit cube, as pairs of corner indices.
 const EDGES: [[usize; 2]; 12] = [
-    [0, 1], [2, 3], [4, 5], [6, 7], // X-aligned
-    [0, 2], [1, 3], [4, 6], [5, 7], // Y-aligned
-    [0, 4], [1, 5], [2, 6], [3, 7], // Z-aligned
+    [0, 1],
+    [2, 3],
+    [4, 5],
+    [6, 7], // X-aligned
+    [0, 2],
+    [1, 3],
+    [4, 6],
+    [5, 7], // Y-aligned
+    [0, 4],
+    [1, 5],
+    [2, 6],
+    [3, 7], // Z-aligned
 ];
 
 /// Corner positions relative to cell origin.
@@ -47,7 +58,8 @@ impl SurfaceNetsMesher {
     pub fn with_chunk_size(size: usize) -> Self {
         let ps = size + 2;
         Self {
-            density: vec![0.0; ps * ps * ps],
+            density: vec![1.0; ps * ps * ps],
+            density_scratch: vec![1.0; ps * ps * ps],
             materials: vec![0u16; ps * ps * ps],
             // (size+1)³ grid: covers cell positions -1..size-1 with +1 offset
             vertex_indices: vec![NO_VERTEX; (size + 1) * (size + 1) * (size + 1)],
@@ -155,55 +167,150 @@ impl SurfaceNetsMesher {
                 }
             }
         }
-    }
 
-    /// Compute smooth normal from density gradient.
-    /// Sample position is clamped to the valid interior of the padded buffer
-    /// so boundary cells get the gradient of the nearest interior position.
-    #[inline]
-    fn gradient_at_cell(&self, cx: isize, cy: isize, cz: isize, ps: usize) -> [f32; 3] {
-        let ps2 = ps * ps;
-        let px = (cx + 1).clamp(1, ps as isize - 2) as usize;
-        let py = (cy + 1).clamp(1, ps as isize - 2) as usize;
-        let pz = (cz + 1).clamp(1, ps as isize - 2) as usize;
-        let pi = px + py * ps + pz * ps2;
+        // Smooth the binary density field to produce gradients at the surface.
+        // 2 passes of 6-neighbor averaging turns the sharp -1/+1 step into a
+        // smooth transition, giving Surface Nets continuous edge crossings.
+        // Ping-pong between buffers: one copy instead of two.
+        self.density_scratch.copy_from_slice(&self.density);
 
-        let nx = self.density[pi + 1] - self.density[pi - 1];
-        let ny = self.density[pi + ps] - self.density[pi - ps];
-        let nz = self.density[pi + ps2] - self.density[pi - ps2];
-        let len = (nx * nx + ny * ny + nz * nz).sqrt();
-        if len > 0.0 {
-            [nx / len, ny / len, nz / len]
-        } else {
-            [0.0, 1.0, 0.0]
-        }
-    }
-
-    /// Compute AO by counting solid neighbors in 3x3x3 neighborhood.
-    /// Sample position is clamped to the valid interior of the padded buffer.
-    #[inline]
-    fn ao_at_cell(&self, cx: isize, cy: isize, cz: isize, ps: usize) -> f32 {
-        let ps2 = ps * ps;
-        let px = (cx + 1).clamp(1, ps as isize - 2) as usize;
-        let py = (cy + 1).clamp(1, ps as isize - 2) as usize;
-        let pz = (cz + 1).clamp(1, ps as isize - 2) as usize;
-        let pi = px + py * ps + pz * ps2;
-
-        let mut solid = 0u32;
-        for dz in [-(ps2 as isize), 0, ps2 as isize] {
-            for dy in [-(ps as isize), 0, ps as isize] {
-                for dx in [-1isize, 0, 1] {
-                    if dx == 0 && dy == 0 && dz == 0 {
-                        continue;
-                    }
-                    let idx = (pi as isize + dx + dy + dz) as usize;
-                    if self.density[idx] < 0.0 {
-                        solid += 1;
-                    }
+        // Pass 1: read density_scratch → write density
+        for z in 1..ps - 1 {
+            for y in 1..ps - 1 {
+                for x in 1..ps - 1 {
+                    let pi = x + y * ps + z * ps2;
+                    self.density[pi] = (self.density_scratch[pi] * 2.0
+                        + self.density_scratch[pi - 1]
+                        + self.density_scratch[pi + 1]
+                        + self.density_scratch[pi - ps]
+                        + self.density_scratch[pi + ps]
+                        + self.density_scratch[pi - ps2]
+                        + self.density_scratch[pi + ps2])
+                        / 8.0;
                 }
             }
         }
-        1.0 - (solid as f32 / 26.0) * 0.6
+
+        // Pass 2: read density → write density_scratch
+        for z in 1..ps - 1 {
+            for y in 1..ps - 1 {
+                for x in 1..ps - 1 {
+                    let pi = x + y * ps + z * ps2;
+                    self.density_scratch[pi] = (self.density[pi] * 2.0
+                        + self.density[pi - 1]
+                        + self.density[pi + 1]
+                        + self.density[pi - ps]
+                        + self.density[pi + ps]
+                        + self.density[pi - ps2]
+                        + self.density[pi + ps2])
+                        / 8.0;
+                }
+            }
+        }
+
+        // Final result is in density_scratch; swap so density has the result
+        std::mem::swap(&mut self.density, &mut self.density_scratch);
+
+        // Blend smoothed density back to binary near chunk boundaries.
+        // Both the padding layer (position -1/size) AND the first/last chunk
+        // positions (0/size-1) are forced fully binary so neighboring chunks
+        // agree on density at their shared boundary. The blend then ramps
+        // from binary to smoothed over ~4 voxels inward.
+        let blend_dist = 4.0f32;
+        for z in 0..ps {
+            for y in 0..ps {
+                for x in 0..ps {
+                    // Distance from the second padded layer inward.
+                    // Padded 0,1 and ps-2,ps-1 all get d=0 (fully binary).
+                    let dx = 0i32.max((x as i32 - 1).min(ps as i32 - 2 - x as i32));
+                    let dy = 0i32.max((y as i32 - 1).min(ps as i32 - 2 - y as i32));
+                    let dz = 0i32.max((z as i32 - 1).min(ps as i32 - 2 - z as i32));
+                    let d = dx.min(dy).min(dz) as f32;
+                    if d >= blend_dist {
+                        continue;
+                    }
+                    let t = d / blend_dist;
+                    let pi = x + y * ps + z * ps2;
+                    let binary: f32 = if self.materials[pi] != 0 { -1.0 } else { 1.0 };
+                    self.density[pi] = binary + (self.density[pi] - binary) * t;
+                }
+            }
+        }
+    }
+
+    /// Compute gradient (normal) and AO from a single pass over the 3x3x3 neighborhood.
+    /// Clamped to the valid interior of the padded buffer so boundary cells
+    /// get values from the nearest interior position.
+    #[inline]
+    fn gradient_and_ao_at_cell(
+        &self,
+        cx: isize,
+        cy: isize,
+        cz: isize,
+        ps: usize,
+    ) -> ([f32; 3], f32) {
+        let ps2 = ps * ps;
+        let px = (cx + 1).clamp(1, ps as isize - 2) as usize;
+        let py = (cy + 1).clamp(1, ps as isize - 2) as usize;
+        let pz = (cz + 1).clamp(1, ps as isize - 2) as usize;
+        let pi = px + py * ps + pz * ps2;
+
+        // Read 6 axis-aligned neighbors (used for both gradient and AO)
+        let d_nx = self.density[pi - 1];
+        let d_px = self.density[pi + 1];
+        let d_ny = self.density[pi - ps];
+        let d_py = self.density[pi + ps];
+        let d_nz = self.density[pi - ps2];
+        let d_pz = self.density[pi + ps2];
+
+        // Gradient from central differences
+        let gx = d_px - d_nx;
+        let gy = d_py - d_ny;
+        let gz = d_pz - d_nz;
+        let len = (gx * gx + gy * gy + gz * gz).sqrt();
+        let normal = if len > 0.0 {
+            [gx / len, gy / len, gz / len]
+        } else {
+            [0.0, 1.0, 0.0]
+        };
+
+        // AO: count solid in 3x3x3 neighborhood (26 neighbors).
+        // Start with the 6 axis-aligned neighbors already loaded.
+        let mut solid = (d_nx < 0.0) as u32
+            + (d_px < 0.0) as u32
+            + (d_ny < 0.0) as u32
+            + (d_py < 0.0) as u32
+            + (d_nz < 0.0) as u32
+            + (d_pz < 0.0) as u32;
+
+        // 12 edge neighbors
+        let psi = ps as isize;
+        let ps2i = ps2 as isize;
+        solid += (self.density[(pi as isize - 1 - psi) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 - psi) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 + psi) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 + psi) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - psi + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + psi + ps2i) as usize] < 0.0) as u32;
+
+        // 8 corner neighbors
+        solid += (self.density[(pi as isize - 1 - psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 - psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 + psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 + psi - ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 - psi + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 - psi + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize - 1 + psi + ps2i) as usize] < 0.0) as u32;
+        solid += (self.density[(pi as isize + 1 + psi + ps2i) as usize] < 0.0) as u32;
+
+        let ao = 1.0 - (solid as f32 / 26.0) * 0.6;
+        (normal, ao)
     }
 }
 
@@ -222,6 +329,11 @@ impl Mesher for SurfaceNetsMesher {
     ) -> Result<(), MeshError> {
         let size = chunk.size();
         debug_assert_eq!(size, self.chunk_size);
+
+        // Skip if no solid blocks anywhere in the padded volume
+        if chunk.is_empty() && !neighbors.has_any_face() {
+            return Ok(());
+        }
 
         self.build_density(chunk, neighbors);
         self.vertex_indices.fill(NO_VERTEX);
@@ -294,19 +406,12 @@ impl Mesher for SurfaceNetsMesher {
                     let vy = cy as f32 + avg[1] * inv;
                     let vz = cz as f32 + avg[2] * inv;
 
-                    let normal = self.gradient_at_cell(cx, cy, cz, ps);
-                    let ao = self.ao_at_cell(cx, cy, cz, ps);
+                    let (normal, ao) = self.gradient_and_ao_at_cell(cx, cy, cz, ps);
 
-                    // Material: first solid corner's block ID
-                    let mut material = 0u16;
-                    let corner_offsets =
-                        [0, 1, ps, 1 + ps, ps2, 1 + ps2, ps + ps2, 1 + ps + ps2];
-                    for (i, &off) in corner_offsets.iter().enumerate() {
-                        if (mask >> i) & 1 != 0 {
-                            material = self.materials[p0 + off];
-                            break;
-                        }
-                    }
+                    // Material: first solid corner's block ID (O(1) via trailing_zeros)
+                    let first_solid = mask.trailing_zeros() as usize;
+                    let corner_offsets = [0, 1, ps, 1 + ps, ps2, 1 + ps2, ps + ps2, 1 + ps + ps2];
+                    let material = self.materials[p0 + corner_offsets[first_solid]];
 
                     let uv = [vx, vz];
                     let vi = output.push_vertex([vx, vy, vz], normal, ao, material, uv);
@@ -321,120 +426,77 @@ impl Mesher for SurfaceNetsMesher {
         }
 
         // === Pass 2: Emit quads for each crossing edge ===
-        // With the extended grid, all density edges within [0, size-1] can form
-        // complete quads (cells at -1 are now in the vertex grid).
+        // Combined single pass over all 3 edge directions.
+        // Reads d0 once per cell and checks X/Y/Z neighbors.
+        // Uses precomputed vertex grid offsets instead of per-call arithmetic.
+        let vi = &self.vertex_indices;
 
-        // Helper to look up a cell vertex from signed cell position.
-        let cell_vi = |cx: isize, cy: isize, cz: isize| -> u32 {
-            let gx = (cx + 1) as usize;
-            let gy = (cy + 1) as usize;
-            let gz = (cz + 1) as usize;
-            self.vertex_indices[gx + gy * gs + gz * gs2]
-        };
-
-        // X-edges: density (x,y,z) to (x+1,y,z)
-        // 4 cells: (x, y-1, z-1), (x, y, z-1), (x, y-1, z), (x, y, z)
         for z in 0..size {
             for y in 0..size {
+                let pi_row = (y + 1) * ps + (z + 1) * ps2;
+                let gi_row = (y + 1) * gs + (z + 1) * gs2;
+
                 for x in 0..size {
-                    let pi = (x + 1) + (y + 1) * ps + (z + 1) * ps2;
+                    let pi = (x + 1) + pi_row;
                     let d0 = self.density[pi];
-                    let d1 = self.density[pi + 1];
-                    if (d0 < 0.0) == (d1 < 0.0) {
-                        continue;
+                    let d0_neg = d0 < 0.0;
+                    let gi = (x + 1) + gi_row;
+
+                    // X-edge: (x,y,z) → (x+1,y,z)
+                    // Quad cells: (x, y-1, z-1), (x, y, z-1), (x, y-1, z), (x, y, z)
+                    if d0_neg != (self.density[pi + 1] < 0.0) {
+                        let c0 = vi[gi - gs - gs2];
+                        let c1 = vi[gi - gs2];
+                        let c2 = vi[gi - gs];
+                        let c3 = vi[gi];
+                        if c0 != NO_VERTEX && c1 != NO_VERTEX && c2 != NO_VERTEX && c3 != NO_VERTEX
+                        {
+                            if d0_neg {
+                                output.push_triangle(c0, c2, c3);
+                                output.push_triangle(c0, c3, c1);
+                            } else {
+                                output.push_triangle(c0, c3, c2);
+                                output.push_triangle(c0, c1, c3);
+                            }
+                        }
                     }
 
-                    let xi = x as isize;
-                    let yi = y as isize;
-                    let zi = z as isize;
-                    let c0 = cell_vi(xi, yi - 1, zi - 1);
-                    let c1 = cell_vi(xi, yi, zi - 1);
-                    let c2 = cell_vi(xi, yi - 1, zi);
-                    let c3 = cell_vi(xi, yi, zi);
-
-                    if c0 == NO_VERTEX || c1 == NO_VERTEX || c2 == NO_VERTEX || c3 == NO_VERTEX
-                    {
-                        continue;
+                    // Y-edge: (x,y,z) → (x,y+1,z)
+                    // Quad cells: (x-1, y, z-1), (x, y, z-1), (x-1, y, z), (x, y, z)
+                    if d0_neg != (self.density[pi + ps] < 0.0) {
+                        let c0 = vi[gi - 1 - gs2];
+                        let c1 = vi[gi - gs2];
+                        let c2 = vi[gi - 1];
+                        let c3 = vi[gi];
+                        if c0 != NO_VERTEX && c1 != NO_VERTEX && c2 != NO_VERTEX && c3 != NO_VERTEX
+                        {
+                            if d0_neg {
+                                output.push_triangle(c0, c1, c3);
+                                output.push_triangle(c0, c3, c2);
+                            } else {
+                                output.push_triangle(c0, c3, c1);
+                                output.push_triangle(c0, c2, c3);
+                            }
+                        }
                     }
 
-                    if d0 < 0.0 {
-                        output.push_triangle(c0, c2, c3);
-                        output.push_triangle(c0, c3, c1);
-                    } else {
-                        output.push_triangle(c0, c3, c2);
-                        output.push_triangle(c0, c1, c3);
-                    }
-                }
-            }
-        }
-
-        // Y-edges: density (x,y,z) to (x,y+1,z)
-        // 4 cells: (x-1, y, z-1), (x, y, z-1), (x-1, y, z), (x, y, z)
-        for z in 0..size {
-            for y in 0..size {
-                for x in 0..size {
-                    let pi = (x + 1) + (y + 1) * ps + (z + 1) * ps2;
-                    let d0 = self.density[pi];
-                    let d1 = self.density[pi + ps];
-                    if (d0 < 0.0) == (d1 < 0.0) {
-                        continue;
-                    }
-
-                    let xi = x as isize;
-                    let yi = y as isize;
-                    let zi = z as isize;
-                    let c0 = cell_vi(xi - 1, yi, zi - 1);
-                    let c1 = cell_vi(xi, yi, zi - 1);
-                    let c2 = cell_vi(xi - 1, yi, zi);
-                    let c3 = cell_vi(xi, yi, zi);
-
-                    if c0 == NO_VERTEX || c1 == NO_VERTEX || c2 == NO_VERTEX || c3 == NO_VERTEX
-                    {
-                        continue;
-                    }
-
-                    if d0 < 0.0 {
-                        output.push_triangle(c0, c1, c3);
-                        output.push_triangle(c0, c3, c2);
-                    } else {
-                        output.push_triangle(c0, c3, c1);
-                        output.push_triangle(c0, c2, c3);
-                    }
-                }
-            }
-        }
-
-        // Z-edges: density (x,y,z) to (x,y,z+1)
-        // 4 cells: (x-1, y-1, z), (x, y-1, z), (x-1, y, z), (x, y, z)
-        for z in 0..size {
-            for y in 0..size {
-                for x in 0..size {
-                    let pi = (x + 1) + (y + 1) * ps + (z + 1) * ps2;
-                    let d0 = self.density[pi];
-                    let d1 = self.density[pi + ps2];
-                    if (d0 < 0.0) == (d1 < 0.0) {
-                        continue;
-                    }
-
-                    let xi = x as isize;
-                    let yi = y as isize;
-                    let zi = z as isize;
-                    let c0 = cell_vi(xi - 1, yi - 1, zi);
-                    let c1 = cell_vi(xi, yi - 1, zi);
-                    let c2 = cell_vi(xi - 1, yi, zi);
-                    let c3 = cell_vi(xi, yi, zi);
-
-                    if c0 == NO_VERTEX || c1 == NO_VERTEX || c2 == NO_VERTEX || c3 == NO_VERTEX
-                    {
-                        continue;
-                    }
-
-                    if d0 < 0.0 {
-                        output.push_triangle(c0, c2, c3);
-                        output.push_triangle(c0, c3, c1);
-                    } else {
-                        output.push_triangle(c0, c3, c2);
-                        output.push_triangle(c0, c1, c3);
+                    // Z-edge: (x,y,z) → (x,y,z+1)
+                    // Quad cells: (x-1, y-1, z), (x, y-1, z), (x-1, y, z), (x, y, z)
+                    if d0_neg != (self.density[pi + ps2] < 0.0) {
+                        let c0 = vi[gi - 1 - gs];
+                        let c1 = vi[gi - gs];
+                        let c2 = vi[gi - 1];
+                        let c3 = vi[gi];
+                        if c0 != NO_VERTEX && c1 != NO_VERTEX && c2 != NO_VERTEX && c3 != NO_VERTEX
+                        {
+                            if d0_neg {
+                                output.push_triangle(c0, c2, c3);
+                                output.push_triangle(c0, c3, c1);
+                            } else {
+                                output.push_triangle(c0, c3, c2);
+                                output.push_triangle(c0, c1, c3);
+                            }
+                        }
                     }
                 }
             }
@@ -465,9 +527,16 @@ mod tests {
     }
 
     #[test]
-    fn single_block_produces_geometry() {
+    fn small_cluster_produces_geometry() {
+        // A 3x3x3 cluster survives smoothing and produces surface geometry
         let mut chunk = Chunk::new_default();
-        chunk.set(16, 16, 16, 1);
+        for z in 15..18 {
+            for y in 15..18 {
+                for x in 15..18 {
+                    chunk.set(x, y, z, 1);
+                }
+            }
+        }
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
         let output = mesh_chunk(&chunk, &neighbors);
         assert!(!output.is_empty());
@@ -513,7 +582,13 @@ mod tests {
     #[test]
     fn output_reuse() {
         let mut chunk = Chunk::new_default();
-        chunk.set(10, 10, 10, 1);
+        for z in 10..13 {
+            for y in 10..13 {
+                for x in 10..13 {
+                    chunk.set(x, y, z, 1);
+                }
+            }
+        }
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
         let mut mesher = SurfaceNetsMesher::new();
         let mut output = MeshOutput::new();

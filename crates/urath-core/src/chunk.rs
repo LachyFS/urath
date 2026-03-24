@@ -108,6 +108,7 @@ impl Face {
 pub struct Chunk {
     blocks: Vec<u16>,
     size: usize,
+    non_air_count: u32,
 }
 
 impl Chunk {
@@ -119,6 +120,7 @@ impl Chunk {
         Ok(Self {
             blocks: vec![0u16; size * size * size],
             size,
+            non_air_count: 0,
         })
     }
 
@@ -127,6 +129,7 @@ impl Chunk {
         Self {
             blocks: vec![0u16; CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE],
             size: CHUNK_SIZE,
+            non_air_count: 0,
         }
     }
 
@@ -154,6 +157,12 @@ impl Chunk {
     pub fn set(&mut self, x: usize, y: usize, z: usize, block_id: u16) {
         debug_assert!(x < self.size && y < self.size && z < self.size);
         let idx = self.index(x, y, z);
+        let old = self.blocks[idx];
+        if old == 0 && block_id != 0 {
+            self.non_air_count += 1;
+        } else if old != 0 && block_id == 0 {
+            self.non_air_count -= 1;
+        }
         self.blocks[idx] = block_id;
     }
 
@@ -174,6 +183,12 @@ impl Chunk {
             i += 4;
             if x < s && y < s && z < s {
                 let idx = self.index(x, y, z);
+                let old = self.blocks[idx];
+                if old == 0 && block_id != 0 {
+                    self.non_air_count += 1;
+                } else if old != 0 && block_id == 0 {
+                    self.non_air_count -= 1;
+                }
                 self.blocks[idx] = block_id;
                 count += 1;
             }
@@ -185,6 +200,18 @@ impl Chunk {
     #[inline]
     pub fn is_air(&self, x: usize, y: usize, z: usize) -> bool {
         self.get(x, y, z) == 0
+    }
+
+    /// True if all blocks are air (block ID 0). O(1).
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.non_air_count == 0
+    }
+
+    /// True if every block is non-air. O(1).
+    #[inline]
+    pub fn is_solid(&self) -> bool {
+        self.non_air_count == (self.size * self.size * self.size) as u32
     }
 
     /// Direct slice access to the underlying block data.
@@ -298,6 +325,19 @@ impl ChunkNeighbors {
     #[inline]
     pub fn border_slice(&self, face: Face) -> Option<&[u16]> {
         self.faces[face as usize].as_deref()
+    }
+
+    /// True if any face has neighbor data set.
+    #[inline]
+    pub fn has_any_face(&self) -> bool {
+        self.faces.iter().any(|f| f.is_some())
+    }
+
+    /// True if all 6 faces have data and every border voxel is non-air.
+    pub fn all_borders_opaque(&self) -> bool {
+        self.faces
+            .iter()
+            .all(|f| f.as_ref().is_some_and(|data| data.iter().all(|&b| b != 0)))
     }
 }
 

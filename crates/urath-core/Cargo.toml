@@ -14,3 +14,7 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [[bench]]
 name = "greedy_mesher"
 harness = false
+
+[[bench]]
+name = "surface_nets"
+harness = false

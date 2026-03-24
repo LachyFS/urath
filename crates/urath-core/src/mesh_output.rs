@@ -99,37 +99,49 @@ impl MeshOutput {
 
         // Batch-write 4 vertices using extend_from_slice to avoid per-push capacity checks
         self.positions.extend_from_slice(&[
-            positions[0][0], positions[0][1], positions[0][2],
-            positions[1][0], positions[1][1], positions[1][2],
-            positions[2][0], positions[2][1], positions[2][2],
-            positions[3][0], positions[3][1], positions[3][2],
+            positions[0][0],
+            positions[0][1],
+            positions[0][2],
+            positions[1][0],
+            positions[1][1],
+            positions[1][2],
+            positions[2][0],
+            positions[2][1],
+            positions[2][2],
+            positions[3][0],
+            positions[3][1],
+            positions[3][2],
         ]);
 
         self.normals.extend_from_slice(&[
-            normal[0], normal[1], normal[2],
-            normal[0], normal[1], normal[2],
-            normal[0], normal[1], normal[2],
-            normal[0], normal[1], normal[2],
+            normal[0], normal[1], normal[2], normal[0], normal[1], normal[2], normal[0], normal[1],
+            normal[2], normal[0], normal[1], normal[2],
         ]);
 
         self.ao.extend_from_slice(&ao_values);
-        self.block_ids.extend_from_slice(&[block_id, block_id, block_id, block_id]);
+        self.block_ids
+            .extend_from_slice(&[block_id, block_id, block_id, block_id]);
 
         self.uvs.extend_from_slice(&[
-            uvs[0][0], uvs[0][1],
-            uvs[1][0], uvs[1][1],
-            uvs[2][0], uvs[2][1],
-            uvs[3][0], uvs[3][1],
+            uvs[0][0], uvs[0][1], uvs[1][0], uvs[1][1], uvs[2][0], uvs[2][1], uvs[3][0], uvs[3][1],
         ]);
 
         // AO-aware triangulation to fix anisotropy artifacts.
         // See: https://0fps.net/2013/07/03/ambient-occlusion-for-minecraft-like-worlds/
         if ao_values[0] + ao_values[2] > ao_values[1] + ao_values[3] {
             // Diagonal 0-2
-            self.indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+            self.indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         } else {
             // Diagonal 1-3
-            self.indices.extend_from_slice(&[base + 1, base + 2, base + 3, base + 1, base + 3, base]);
+            self.indices.extend_from_slice(&[
+                base + 1,
+                base + 2,
+                base + 3,
+                base + 1,
+                base + 3,
+                base,
+            ]);
         }
 
         self.vertex_count += 4;
