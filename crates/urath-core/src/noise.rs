@@ -91,6 +91,9 @@ pub fn noise3d(x: f32, y: f32, z: f32) -> f32 {
 /// Persistence = 0.5, lacunarity = 2.0. Returns a value in [0, 1].
 #[inline]
 pub fn fbm2d(x: f32, y: f32, octaves: u32) -> f32 {
+    if octaves == 0 {
+        return 0.5;
+    }
     let mut val = 0.0f32;
     let mut amp = 1.0f32;
     let mut freq = 1.0f32;
@@ -111,6 +114,9 @@ pub fn fbm2d(x: f32, y: f32, octaves: u32) -> f32 {
 /// Persistence = 0.5, lacunarity = 2.0. Returns a value in [0, 1].
 #[inline]
 pub fn fbm3d(x: f32, y: f32, z: f32, octaves: u32) -> f32 {
+    if octaves == 0 {
+        return 0.5;
+    }
     let mut val = 0.0f32;
     let mut amp = 1.0f32;
     let mut freq = 1.0f32;
@@ -200,6 +206,12 @@ mod tests {
     }
 
     #[test]
+    fn fbm_zero_octaves() {
+        assert_eq!(fbm2d(1.0, 2.0, 0), 0.5);
+        assert_eq!(fbm3d(1.0, 2.0, 3.0, 0), 0.5);
+    }
+
+    #[test]
     fn fbm2d_single_octave_equals_noise() {
         let fbm = fbm2d(3.7, 2.1, 1);
         let noi = noise2d(3.7, 2.1);
@@ -216,7 +228,7 @@ mod tests {
             let y = i as f32 * 0.7 + 30.0;
             let v = fbm2d(x, y, 4);
             assert!(
-                v >= -0.01 && v <= 1.01,
+                (-0.01..=1.01).contains(&v),
                 "fbm2d({x}, {y}, 4) = {v} out of range"
             );
         }
@@ -230,7 +242,7 @@ mod tests {
             let z = i as f32 * 0.9 - 25.0;
             let v = fbm3d(x, y, z, 3);
             assert!(
-                v >= -0.01 && v <= 1.01,
+                (-0.01..=1.01).contains(&v),
                 "fbm3d({x}, {y}, {z}, 3) = {v} out of range"
             );
         }

@@ -175,7 +175,7 @@ impl Chunk {
         let s = self.size;
         let mut count = 0u32;
         let mut i = 0;
-        while i + 3 < edits.len() {
+        while i + 4 <= edits.len() {
             let x = edits[i] as usize;
             let y = edits[i + 1] as usize;
             let z = edits[i + 2] as usize;
@@ -212,6 +212,20 @@ impl Chunk {
     #[inline]
     pub fn is_solid(&self) -> bool {
         self.non_air_count == (self.size * self.size * self.size) as u32
+    }
+
+    /// Replace all blocks from a slice. Recomputes non_air_count.
+    pub fn replace_blocks(&mut self, blocks: &[u16]) -> Result<(), MeshError> {
+        let vol = self.size * self.size * self.size;
+        if blocks.len() != vol {
+            return Err(MeshError::SizeMismatch {
+                expected: vol,
+                actual: blocks.len(),
+            });
+        }
+        self.blocks.copy_from_slice(blocks);
+        self.non_air_count = blocks.iter().filter(|&&b| b != 0).count() as u32;
+        Ok(())
     }
 
     /// Direct slice access to the underlying block data.
@@ -298,10 +312,18 @@ impl ChunkNeighbors {
     }
 
     /// Set the border data for a neighboring face.
-    /// `data` should be a flat `size x size` array of block IDs from the
+    /// `data` must be a flat `size x size` array of block IDs from the
     /// neighbor chunk's border layer.
-    pub fn set_face(&mut self, face: Face, data: Vec<u16>) {
+    pub fn set_face(&mut self, face: Face, data: Vec<u16>) -> Result<(), MeshError> {
+        let expected = self.size * self.size;
+        if data.len() != expected {
+            return Err(MeshError::SizeMismatch {
+                expected,
+                actual: data.len(),
+            });
+        }
         self.faces[face as usize] = Some(data);
+        Ok(())
     }
 
     /// Get a block from the neighbor's border.
@@ -333,11 +355,13 @@ impl ChunkNeighbors {
         self.faces.iter().any(|f| f.is_some())
     }
 
-    /// True if all 6 faces have data and every border voxel is non-air.
-    pub fn all_borders_opaque(&self) -> bool {
-        self.faces
-            .iter()
-            .all(|f| f.as_ref().is_some_and(|data| data.iter().all(|&b| b != 0)))
+    /// True if all 6 faces have data and every border voxel is opaque
+    /// according to the given registry.
+    pub fn all_borders_opaque(&self, registry: &crate::block::BlockRegistry) -> bool {
+        self.faces.iter().all(|f| {
+            f.as_ref()
+                .is_some_and(|data| data.iter().all(|&b| registry.is_opaque(b)))
+        })
     }
 }
 
@@ -416,9 +440,23 @@ mod tests {
         let mut neighbors = ChunkNeighbors::empty(32);
         let mut data = vec![0u16; 32 * 32];
         data[5 + 10 * 32] = 7;
-        neighbors.set_face(Face::PosX, data);
+        neighbors.set_face(Face::PosX, data).unwrap();
         assert!(neighbors.has_face(Face::PosX));
         assert_eq!(neighbors.get_border_block(Face::PosX, 5, 10), 7);
         assert_eq!(neighbors.get_border_block(Face::PosX, 0, 0), 0);
+    }
+
+    #[test]
+    fn set_face_wrong_size() {
+        let mut neighbors = ChunkNeighbors::empty(32);
+        let data = vec![0u16; 10]; // wrong size
+        assert!(neighbors.set_face(Face::PosX, data).is_err());
+    }
+
+    #[test]
+    fn replace_blocks_wrong_size() {
+        let mut chunk = Chunk::new_default();
+        let data = vec![0u16; 10]; // wrong size
+        assert!(chunk.replace_blocks(&data).is_err());
     }
 }

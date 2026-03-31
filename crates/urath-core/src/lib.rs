@@ -9,7 +9,7 @@ pub mod noise;
 pub mod surface_nets;
 pub mod terrain;
 
-pub use block::{AIR, DIRT, GRASS, GRAVEL, LEAVES, LOG, SAND, SNOW, STONE, WATER};
+pub use block::{AIR, BlockRegistry, DIRT, GRASS, GRAVEL, LEAVES, LOG, SAND, SNOW, STONE, WATER};
 pub use chunk::{CHUNK_SIZE, Chunk, ChunkNeighbors, Face};
 pub use error::MeshError;
 pub use greedy::GreedyMesher;

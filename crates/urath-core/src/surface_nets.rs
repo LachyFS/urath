@@ -1,3 +1,4 @@
+use crate::block::BlockRegistry;
 use crate::chunk::{Chunk, ChunkNeighbors, Face};
 use crate::error::MeshError;
 use crate::mesh_output::MeshOutput;
@@ -325,10 +326,17 @@ impl Mesher for SurfaceNetsMesher {
         &mut self,
         chunk: &Chunk,
         neighbors: &ChunkNeighbors,
+        _registry: &BlockRegistry,
         output: &mut MeshOutput,
+        _transparent_output: &mut MeshOutput,
     ) -> Result<(), MeshError> {
         let size = chunk.size();
-        debug_assert_eq!(size, self.chunk_size);
+        if size != self.chunk_size {
+            return Err(MeshError::ChunkSizeMismatch {
+                chunk: size,
+                mesher: self.chunk_size,
+            });
+        }
 
         // Skip if no solid blocks anywhere in the padded volume
         if chunk.is_empty() && !neighbors.has_any_face() {
@@ -513,8 +521,12 @@ mod tests {
 
     fn mesh_chunk(chunk: &Chunk, neighbors: &ChunkNeighbors) -> MeshOutput {
         let mut mesher = SurfaceNetsMesher::with_chunk_size(chunk.size());
+        let registry = BlockRegistry::new();
         let mut output = MeshOutput::new();
-        mesher.mesh(chunk, neighbors, &mut output).unwrap();
+        let mut transparent = MeshOutput::new();
+        mesher
+            .mesh(chunk, neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
         output
     }
 
@@ -590,15 +602,22 @@ mod tests {
             }
         }
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
+        let registry = BlockRegistry::new();
         let mut mesher = SurfaceNetsMesher::new();
         let mut output = MeshOutput::new();
+        let mut transparent = MeshOutput::new();
 
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
         let v1 = output.vertex_count();
         assert!(v1 > 0);
 
         output.clear();
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        transparent.clear();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
         assert_eq!(output.vertex_count(), v1);
     }
 }

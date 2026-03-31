@@ -7,4 +7,10 @@ pub enum MeshError {
 
     #[error("coordinates ({0}, {1}, {2}) out of bounds for chunk of size {3}")]
     OutOfBounds(usize, usize, usize, usize),
+
+    #[error("expected {expected} elements, got {actual}")]
+    SizeMismatch { expected: usize, actual: usize },
+
+    #[error("chunk size {chunk} does not match mesher size {mesher}")]
+    ChunkSizeMismatch { chunk: usize, mesher: usize },
 }

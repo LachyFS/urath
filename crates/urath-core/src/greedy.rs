@@ -1,4 +1,5 @@
-use crate::ao::vertex_ao;
+use crate::ao::{AO_SCALE, vertex_ao};
+use crate::block::BlockRegistry;
 use crate::chunk::{Chunk, ChunkNeighbors, Face};
 use crate::error::MeshError;
 use crate::mesh_output::MeshOutput;
@@ -10,6 +11,9 @@ use crate::mesher::Mesher;
 /// normal. Within each slice, builds a 2D mask of visible faces, then greedily
 /// merges adjacent faces with matching block IDs and AO values into larger quads.
 ///
+/// Produces separate opaque and transparent geometry so the renderer can draw
+/// them in the correct order (opaque first, then transparent with alpha test).
+///
 /// Reference: <https://0fps.net/2012/06/30/meshing-in-a-block-world/>
 pub struct GreedyMesher {
     /// Scratch buffer for the face mask of one slice.
@@ -18,9 +22,12 @@ pub struct GreedyMesher {
     /// Scratch buffer for AO values per face in one slice.
     /// Stored as `[u8; 4]` (0–3 per vertex) for exact equality comparison during merge.
     ao_mask: Vec<[u8; 4]>,
-    /// Padded (size+2)³ opacity buffer for branchless neighbor lookups.
-    /// Built once per mesh() call from chunk data + neighbor borders.
-    opaque: Vec<u8>,
+    /// Padded (size+2)³ block ID buffer for face culling.
+    /// Stores actual block IDs so transparent-vs-opaque decisions can be made per-block.
+    padded_blocks: Vec<u16>,
+    /// Padded (size+2)³ opacity buffer for AO computation.
+    /// Only opaque blocks are marked (1); transparent blocks do not occlude.
+    ao_opaque: Vec<u8>,
     /// The chunk size this mesher is configured for.
     chunk_size: usize,
 }
@@ -35,23 +42,33 @@ impl GreedyMesher {
     pub fn with_chunk_size(size: usize) -> Self {
         let area = size * size;
         let ps = size + 2;
+        let pvol = ps * ps * ps;
         Self {
             mask: vec![0u16; area],
             ao_mask: vec![[0u8; 4]; area],
-            opaque: vec![0u8; ps * ps * ps],
+            padded_blocks: vec![0u16; pvol],
+            ao_opaque: vec![0u8; pvol],
             chunk_size: size,
         }
     }
 
-    /// Build the padded opacity buffer from chunk data and neighbor borders.
-    /// The buffer has 1-cell padding on all sides so that all neighbor lookups
-    /// (including AO diagonal samples) are simple array accesses with no bounds checks.
-    fn build_opaque(&mut self, chunk: &Chunk, neighbors: &ChunkNeighbors) {
+    /// Build the padded block ID and AO opacity buffers from chunk data and
+    /// neighbor borders. Returns `true` if the chunk contains any transparent
+    /// blocks (so the caller can skip the transparent sweep when there are none).
+    fn build_padded(
+        &mut self,
+        chunk: &Chunk,
+        neighbors: &ChunkNeighbors,
+        registry: &BlockRegistry,
+    ) -> bool {
         let s = self.chunk_size;
         let ps = s + 2;
         let ps2 = ps * ps;
 
-        self.opaque.fill(0);
+        self.padded_blocks.fill(0);
+        self.ao_opaque.fill(0);
+
+        let mut has_transparent = false;
 
         // Fill interior from chunk blocks
         let blocks = chunk.blocks();
@@ -60,8 +77,15 @@ impl GreedyMesher {
                 let chunk_row = y * s + z * s * s;
                 let pad_row = (y + 1) * ps + (z + 1) * ps2;
                 for x in 0..s {
-                    if blocks[chunk_row + x] != 0 {
-                        self.opaque[pad_row + x + 1] = 1;
+                    let block = blocks[chunk_row + x];
+                    if block != 0 {
+                        let pi = pad_row + x + 1;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        } else {
+                            has_transparent = true;
+                        }
                     }
                 }
             }
@@ -76,8 +100,13 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::NegX) {
             for y in 0..s {
                 for z in 0..s {
-                    if data[z + y * s] != 0 {
-                        self.opaque[(y + 1) * ps + (z + 1) * ps2] = 1;
+                    let block = data[z + y * s];
+                    if block != 0 {
+                        let pi = (y + 1) * ps + (z + 1) * ps2;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
@@ -85,8 +114,13 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::PosX) {
             for y in 0..s {
                 for z in 0..s {
-                    if data[z + y * s] != 0 {
-                        self.opaque[(s + 1) + (y + 1) * ps + (z + 1) * ps2] = 1;
+                    let block = data[z + y * s];
+                    if block != 0 {
+                        let pi = (s + 1) + (y + 1) * ps + (z + 1) * ps2;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
@@ -94,8 +128,13 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::NegY) {
             for z in 0..s {
                 for x in 0..s {
-                    if data[x + z * s] != 0 {
-                        self.opaque[(x + 1) + (z + 1) * ps2] = 1;
+                    let block = data[x + z * s];
+                    if block != 0 {
+                        let pi = (x + 1) + (z + 1) * ps2;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
@@ -103,8 +142,13 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::PosY) {
             for z in 0..s {
                 for x in 0..s {
-                    if data[x + z * s] != 0 {
-                        self.opaque[(x + 1) + (s + 1) * ps + (z + 1) * ps2] = 1;
+                    let block = data[x + z * s];
+                    if block != 0 {
+                        let pi = (x + 1) + (s + 1) * ps + (z + 1) * ps2;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
@@ -112,8 +156,13 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::NegZ) {
             for y in 0..s {
                 for x in 0..s {
-                    if data[x + y * s] != 0 {
-                        self.opaque[(x + 1) + (y + 1) * ps] = 1;
+                    let block = data[x + y * s];
+                    if block != 0 {
+                        let pi = (x + 1) + (y + 1) * ps;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
@@ -121,74 +170,61 @@ impl GreedyMesher {
         if let Some(data) = neighbors.border_slice(Face::PosZ) {
             for y in 0..s {
                 for x in 0..s {
-                    if data[x + y * s] != 0 {
-                        self.opaque[(x + 1) + (y + 1) * ps + (s + 1) * ps2] = 1;
+                    let block = data[x + y * s];
+                    if block != 0 {
+                        let pi = (x + 1) + (y + 1) * ps + (s + 1) * ps2;
+                        self.padded_blocks[pi] = block;
+                        if registry.is_opaque(block) {
+                            self.ao_opaque[pi] = 1;
+                        }
                     }
                 }
             }
         }
-    }
-}
 
-impl Default for GreedyMesher {
-    fn default() -> Self {
-        Self::new()
+        has_transparent
     }
-}
 
-impl Mesher for GreedyMesher {
-    fn mesh(
+    /// Sweep all 6 face directions and emit greedy-merged quads for one pass.
+    ///
+    /// When `TRANSPARENT` is false (opaque pass):
+    /// - Only processes opaque blocks.
+    /// - A face is visible when the neighbor is not opaque (air or transparent).
+    ///
+    /// When `TRANSPARENT` is true (transparent pass):
+    /// - Only processes transparent blocks.
+    /// - A face is visible when the neighbor is not opaque AND differs in block ID.
+    ///   This means same-type transparent neighbours cull their shared face
+    ///   (e.g. leaf-to-leaf), while different types keep both faces visible.
+    fn sweep_faces<const TRANSPARENT: bool>(
         &mut self,
-        chunk: &Chunk,
-        neighbors: &ChunkNeighbors,
+        blocks: &[u16],
+        registry: &BlockRegistry,
+        size: usize,
         output: &mut MeshOutput,
-    ) -> Result<(), MeshError> {
-        let size = chunk.size();
-        debug_assert_eq!(size, self.chunk_size, "chunk size mismatch with mesher");
-
-        // Skip entirely empty chunks (no non-air blocks → no faces to emit)
-        if chunk.is_empty() {
-            return Ok(());
-        }
-
-        // Skip fully solid chunks where all neighbors are also solid
-        // (no air boundary → no visible faces)
-        if chunk.is_solid() && neighbors.all_borders_opaque() {
-            return Ok(());
-        }
-
-        // Build padded opacity buffer once for the entire mesh
-        self.build_opaque(chunk, neighbors);
-
-        let blocks = chunk.blocks();
+    ) {
         let ps = size + 2;
         let ps2 = ps * ps;
 
-        // Pre-computed strides for chunk and padded buffer indexing
         let chunk_strides: [usize; 3] = [1, size, size * size];
         let pad_strides: [usize; 3] = [1, ps, ps2];
-        // Padded index of chunk coordinate (0,0,0)
         let pad_origin = 1 + ps + ps2;
 
         for &face in &Face::ALL {
-            // Pre-compute all per-face values (hoisted out of O(n³) inner loops)
             let (u_axis, v_axis) = face.tangent_axes();
             let n_axis = face.normal_axis();
             let normal_f32 = face.normal_f32();
             let is_positive = face.is_positive();
             let swap_uv = u_axis == 1;
 
-            // Chunk buffer strides for face-local (u, v, d) iteration
             let u_cstride = chunk_strides[u_axis];
             let v_cstride = chunk_strides[v_axis];
             let n_cstride = chunk_strides[n_axis];
 
-            // Padded buffer strides
             let u_pstride = pad_strides[u_axis];
             let v_pstride = pad_strides[v_axis];
             let n_pstride = pad_strides[n_axis];
 
-            // Signed normal offset in padded buffer
             let n_poffset: isize = if is_positive {
                 n_pstride as isize
             } else {
@@ -198,7 +234,7 @@ impl Mesher for GreedyMesher {
             let depth_add: f32 = if is_positive { 1.0 } else { 0.0 };
 
             for d in 0..size {
-                // === Pass 1: Build face mask for this slice ===
+                // === Build face mask for this slice ===
                 self.mask.fill(0);
 
                 let d_chunk_base = d * n_cstride;
@@ -215,37 +251,56 @@ impl Mesher for GreedyMesher {
                             continue;
                         }
 
-                        // Face culling: single array lookup (no branches!)
-                        let pad_idx = dv_pad + u * u_pstride;
-                        let neighbor_opaque =
-                            self.opaque[(pad_idx as isize + n_poffset) as usize] != 0;
-
-                        if !neighbor_opaque {
-                            let mask_idx = u + v * size;
-                            self.mask[mask_idx] = block;
-
-                            // AO: 8 direct array lookups (no function calls, no branches)
-                            let center = (pad_idx as isize + n_poffset) as usize;
-                            let s_neg_u = self.opaque[center - u_pstride] != 0;
-                            let s_pos_u = self.opaque[center + u_pstride] != 0;
-                            let s_neg_v = self.opaque[center - v_pstride] != 0;
-                            let s_pos_v = self.opaque[center + v_pstride] != 0;
-                            let s_nu_nv = self.opaque[center - u_pstride - v_pstride] != 0;
-                            let s_pu_nv = self.opaque[center + u_pstride - v_pstride] != 0;
-                            let s_pu_pv = self.opaque[center + u_pstride + v_pstride] != 0;
-                            let s_nu_pv = self.opaque[center - u_pstride + v_pstride] != 0;
-
-                            self.ao_mask[mask_idx] = [
-                                vertex_ao(s_neg_u, s_neg_v, s_nu_nv),
-                                vertex_ao(s_pos_u, s_neg_v, s_pu_nv),
-                                vertex_ao(s_pos_u, s_pos_v, s_pu_pv),
-                                vertex_ao(s_neg_u, s_pos_v, s_nu_pv),
-                            ];
+                        // Block selection: only process blocks matching this pass
+                        if TRANSPARENT {
+                            if registry.is_opaque(block) {
+                                continue;
+                            }
+                        } else if !registry.is_opaque(block) {
+                            continue;
                         }
+
+                        let pad_idx = dv_pad + u * u_pstride;
+                        let neighbor_block =
+                            self.padded_blocks[(pad_idx as isize + n_poffset) as usize];
+
+                        // Face visibility
+                        let face_visible = if TRANSPARENT {
+                            // Visible unless neighbour is opaque or same transparent type
+                            !registry.is_opaque(neighbor_block) && neighbor_block != block
+                        } else {
+                            // Visible when neighbour is not opaque (air or transparent)
+                            !registry.is_opaque(neighbor_block)
+                        };
+
+                        if !face_visible {
+                            continue;
+                        }
+
+                        let mask_idx = u + v * size;
+                        self.mask[mask_idx] = block;
+
+                        // AO: 8 lookups from ao_opaque (only opaque blocks occlude)
+                        let center = (pad_idx as isize + n_poffset) as usize;
+                        let s_neg_u = self.ao_opaque[center - u_pstride] != 0;
+                        let s_pos_u = self.ao_opaque[center + u_pstride] != 0;
+                        let s_neg_v = self.ao_opaque[center - v_pstride] != 0;
+                        let s_pos_v = self.ao_opaque[center + v_pstride] != 0;
+                        let s_nu_nv = self.ao_opaque[center - u_pstride - v_pstride] != 0;
+                        let s_pu_nv = self.ao_opaque[center + u_pstride - v_pstride] != 0;
+                        let s_pu_pv = self.ao_opaque[center + u_pstride + v_pstride] != 0;
+                        let s_nu_pv = self.ao_opaque[center - u_pstride + v_pstride] != 0;
+
+                        self.ao_mask[mask_idx] = [
+                            vertex_ao(s_neg_u, s_neg_v, s_nu_nv),
+                            vertex_ao(s_pos_u, s_neg_v, s_pu_nv),
+                            vertex_ao(s_pos_u, s_pos_v, s_pu_pv),
+                            vertex_ao(s_neg_u, s_pos_v, s_nu_pv),
+                        ];
                     }
                 }
 
-                // === Pass 2: Greedy merge ===
+                // === Greedy merge ===
                 for v in 0..size {
                     let mut u = 0;
                     while u < size {
@@ -313,7 +368,6 @@ impl Mesher for GreedyMesher {
                         };
 
                         // Convert AO from u8 (0–3) to f32 (0.0–1.0)
-                        const AO_SCALE: f32 = 1.0 / 3.0;
                         let ao_f32 = [
                             ao_val[0] as f32 * AO_SCALE,
                             ao_val[1] as f32 * AO_SCALE,
@@ -334,6 +388,49 @@ impl Mesher for GreedyMesher {
                     }
                 }
             }
+        }
+    }
+}
+
+impl Default for GreedyMesher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Mesher for GreedyMesher {
+    fn mesh(
+        &mut self,
+        chunk: &Chunk,
+        neighbors: &ChunkNeighbors,
+        registry: &BlockRegistry,
+        output: &mut MeshOutput,
+        transparent_output: &mut MeshOutput,
+    ) -> Result<(), MeshError> {
+        let size = chunk.size();
+        if size != self.chunk_size {
+            return Err(MeshError::ChunkSizeMismatch {
+                chunk: size,
+                mesher: self.chunk_size,
+            });
+        }
+
+        // Skip entirely empty chunks (no non-air blocks → no faces to emit)
+        if chunk.is_empty() {
+            return Ok(());
+        }
+
+        // Build padded block ID + AO buffers once for the entire mesh
+        let has_transparent = self.build_padded(chunk, neighbors, registry);
+
+        let blocks = chunk.blocks();
+
+        // Opaque pass
+        self.sweep_faces::<false>(blocks, registry, size, output);
+
+        // Transparent pass (skip if no transparent blocks in chunk)
+        if has_transparent {
+            self.sweep_faces::<true>(blocks, registry, size, transparent_output);
         }
 
         Ok(())
@@ -397,21 +494,35 @@ fn quad_positions(u: usize, v: usize, d: usize, w: usize, h: usize, face: Face) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::block;
     use crate::chunk::CHUNK_SIZE;
 
-    fn mesh_chunk(chunk: &Chunk, neighbors: &ChunkNeighbors) -> MeshOutput {
+    fn mesh_chunk(chunk: &Chunk, neighbors: &ChunkNeighbors) -> (MeshOutput, MeshOutput) {
+        let registry = BlockRegistry::new();
+        mesh_chunk_with_registry(chunk, neighbors, &registry)
+    }
+
+    fn mesh_chunk_with_registry(
+        chunk: &Chunk,
+        neighbors: &ChunkNeighbors,
+        registry: &BlockRegistry,
+    ) -> (MeshOutput, MeshOutput) {
         let mut mesher = GreedyMesher::with_chunk_size(chunk.size());
         let mut output = MeshOutput::new();
-        mesher.mesh(chunk, neighbors, &mut output).unwrap();
-        output
+        let mut transparent = MeshOutput::new();
+        mesher
+            .mesh(chunk, neighbors, registry, &mut output, &mut transparent)
+            .unwrap();
+        (output, transparent)
     }
 
     #[test]
     fn empty_chunk() {
         let chunk = Chunk::new_default();
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
         assert!(output.is_empty());
+        assert!(transparent.is_empty());
     }
 
     #[test]
@@ -425,11 +536,12 @@ mod tests {
             }
         }
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
 
         // A solid chunk with air neighbors has 6 faces, each fully merged into 1 quad
         assert_eq!(output.vertex_count(), 24); // 6 faces × 4 vertices
         assert_eq!(output.index_count(), 36); // 6 faces × 6 indices
+        assert!(transparent.is_empty());
     }
 
     #[test]
@@ -437,7 +549,7 @@ mod tests {
         let mut chunk = Chunk::new_default();
         chunk.set(16, 16, 16, 1);
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, _) = mesh_chunk(&chunk, &neighbors);
 
         // Single block exposed on all 6 faces
         assert_eq!(output.vertex_count(), 24); // 6 × 4
@@ -450,7 +562,7 @@ mod tests {
         chunk.set(0, 0, 0, 1);
         chunk.set(1, 0, 0, 1);
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, _) = mesh_chunk(&chunk, &neighbors);
 
         assert_eq!(output.vertex_count(), 24);
         assert_eq!(output.index_count(), 36);
@@ -462,7 +574,7 @@ mod tests {
         chunk.set(0, 0, 0, 1);
         chunk.set(1, 0, 0, 2); // Different block ID
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, _) = mesh_chunk(&chunk, &neighbors);
 
         // 10 quads (shared face culled but can't merge across different IDs)
         assert_eq!(output.vertex_count(), 40); // 10 × 4
@@ -477,10 +589,10 @@ mod tests {
         // Set up a neighbor on the +X face with a solid block adjacent
         let mut neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
         let mut pos_x_border = vec![0u16; CHUNK_SIZE * CHUNK_SIZE];
-        pos_x_border[0 + 0 * CHUNK_SIZE] = 1; // Block at (z=0, y=0) on neighbor border
-        neighbors.set_face(Face::PosX, pos_x_border);
+        pos_x_border[0] = 1; // Block at (z=0, y=0) on neighbor border
+        neighbors.set_face(Face::PosX, pos_x_border).unwrap();
 
-        let output = mesh_chunk(&chunk, &neighbors);
+        let (output, _) = mesh_chunk(&chunk, &neighbors);
 
         // The +X face of our block should be culled by the neighbor.
         // Remaining: 5 faces × 1 quad each
@@ -490,7 +602,7 @@ mod tests {
 
     #[test]
     fn checkerboard_no_merge() {
-        // 4x4x1 slab with checkerboard pattern (alternating fill)
+        // 4x4x4 chunk with checkerboard pattern (alternating fill)
         let mut chunk = Chunk::new(4).unwrap();
         let mut expected_faces = 0u32;
         for z in 0..4 {
@@ -505,9 +617,10 @@ mod tests {
                             let ny = y as i32 + n[1];
                             let nz = z as i32 + n[2];
                             // In a 3D checkerboard, all neighbors are air
-                            if nx < 0 || nx >= 4 || ny < 0 || ny >= 4 || nz < 0 || nz >= 4 {
-                                expected_faces += 1;
-                            } else if (nx + ny + nz) % 2 != 0 {
+                            let oob = !(0..4).contains(&nx)
+                                || !(0..4).contains(&ny)
+                                || !(0..4).contains(&nz);
+                            if oob || (nx + ny + nz) % 2 != 0 {
                                 expected_faces += 1;
                             }
                         }
@@ -518,8 +631,12 @@ mod tests {
 
         let neighbors = ChunkNeighbors::empty(4);
         let mut mesher = GreedyMesher::with_chunk_size(4);
+        let registry = BlockRegistry::new();
         let mut output = MeshOutput::new();
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        let mut transparent = MeshOutput::new();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
 
         // Each face is 1x1, no merging possible in a checkerboard
         assert_eq!(output.vertex_count(), expected_faces * 4);
@@ -530,18 +647,25 @@ mod tests {
         let mut chunk = Chunk::new_default();
         chunk.set(10, 10, 10, 1);
         let neighbors = ChunkNeighbors::empty(CHUNK_SIZE);
+        let registry = BlockRegistry::new();
         let mut mesher = GreedyMesher::new();
         let mut output = MeshOutput::with_capacity(100);
+        let mut transparent = MeshOutput::new();
 
         // First mesh
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
         let first_vertex_count = output.vertex_count();
         let first_index_count = output.index_count();
         assert!(!output.is_empty());
 
         // Clear and mesh again
         output.clear();
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        transparent.clear();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
 
         assert_eq!(output.vertex_count(), first_vertex_count);
         assert_eq!(output.index_count(), first_index_count);
@@ -560,8 +684,12 @@ mod tests {
         }
         let neighbors = ChunkNeighbors::empty(4);
         let mut mesher = GreedyMesher::with_chunk_size(4);
+        let registry = BlockRegistry::new();
         let mut output = MeshOutput::new();
-        mesher.mesh(&chunk, &neighbors, &mut output).unwrap();
+        let mut transparent = MeshOutput::new();
+        mesher
+            .mesh(&chunk, &neighbors, &registry, &mut output, &mut transparent)
+            .unwrap();
 
         assert!(!output.is_empty());
         assert_eq!(output.vertex_count(), 24);
@@ -599,5 +727,105 @@ mod tests {
     fn quad_positions_negative_face() {
         let positions = quad_positions(0, 0, 5, 1, 1, Face::NegX);
         assert_eq!(positions[0][0], 5.0);
+    }
+
+    // --- Transparent block tests ---
+
+    #[test]
+    fn single_transparent_block() {
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.set(2, 2, 2, block::LEAVES);
+        let neighbors = ChunkNeighbors::empty(4);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
+
+        // Opaque output should be empty
+        assert!(output.is_empty());
+        // Transparent should have 6 faces
+        assert_eq!(transparent.vertex_count(), 24);
+        assert_eq!(transparent.index_count(), 36);
+    }
+
+    #[test]
+    fn transparent_blocks_self_cull() {
+        // Two adjacent leaves blocks should cull their shared face
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.set(1, 1, 1, block::LEAVES);
+        chunk.set(2, 1, 1, block::LEAVES);
+        let neighbors = ChunkNeighbors::empty(4);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
+
+        assert!(output.is_empty());
+        // 2 blocks × 6 faces - 2 culled shared faces = 10 quads
+        // But greedy merge joins the 4 co-planar same-ID faces → fewer quads
+        // Each merged face still needs correct vertex/index count
+        // 10 individual faces, some merge → total vertices ≤ 40
+        assert!(transparent.vertex_count() <= 40);
+        assert!(transparent.vertex_count() > 0);
+    }
+
+    #[test]
+    fn opaque_next_to_transparent_shows_opaque_face() {
+        // Stone next to leaves: the stone face touching leaves must be visible
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.set(1, 1, 1, block::STONE);
+        chunk.set(2, 1, 1, block::LEAVES);
+        let neighbors = ChunkNeighbors::empty(4);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
+
+        // Stone has 6 visible faces (leaves neighbor is transparent, so face shows)
+        assert_eq!(output.vertex_count(), 24);
+        // Leaves: 5 visible faces (face touching stone is hidden by the opaque block)
+        assert_eq!(transparent.vertex_count(), 20);
+    }
+
+    #[test]
+    fn different_transparent_types_dont_cull() {
+        // Leaves next to water: both faces should be visible
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.set(1, 1, 1, block::LEAVES);
+        chunk.set(2, 1, 1, block::WATER);
+        let neighbors = ChunkNeighbors::empty(4);
+        let (output, transparent) = mesh_chunk(&chunk, &neighbors);
+
+        assert!(output.is_empty());
+        // Both blocks have all 6 faces visible (different transparent types don't cull)
+        assert_eq!(transparent.vertex_count(), 48); // 12 quads × 4 vertices
+    }
+
+    #[test]
+    fn transparent_does_not_contribute_ao() {
+        // An opaque block surrounded by leaves should have no AO darkening
+        let mut chunk = Chunk::new(8).unwrap();
+        chunk.set(4, 4, 4, block::STONE);
+        // Place leaves around the +Y face
+        chunk.set(3, 5, 4, block::LEAVES);
+        chunk.set(4, 5, 3, block::LEAVES);
+        chunk.set(3, 5, 3, block::LEAVES);
+
+        let neighbors = ChunkNeighbors::empty(8);
+        let (output, _) = mesh_chunk(&chunk, &neighbors);
+
+        // Check that all AO values are 1.0 (fully lit) since leaves don't occlude
+        for &val in output.ao.iter() {
+            assert_eq!(val, 1.0, "transparent blocks should not contribute to AO");
+        }
+    }
+
+    #[test]
+    fn all_opaque_registry_treats_leaves_as_opaque() {
+        // Custom registry where leaves are opaque
+        let mut registry = BlockRegistry::new();
+        registry.set_opaque(block::LEAVES);
+
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.set(1, 1, 1, block::STONE);
+        chunk.set(2, 1, 1, block::LEAVES);
+        let neighbors = ChunkNeighbors::empty(4);
+        let (output, transparent) = mesh_chunk_with_registry(&chunk, &neighbors, &registry);
+
+        // Both blocks are opaque now, shared face culled
+        // 10 quads total in opaque output
+        assert_eq!(output.vertex_count(), 40);
+        assert!(transparent.is_empty());
     }
 }

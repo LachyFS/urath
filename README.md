@@ -102,6 +102,20 @@ mesher.mesh(&chunk, &neighbors, &mut output)?;
 output.clear();
 ```
 
+## Demo
+
+An interactive Three.js demo with block placement is included. Build the WASM package first, then serve the demo directory:
+
+```bash
+# Build WASM (if not already built)
+cd crates/urath-wasm && wasm-pack build --target web --out-dir ../../packages/urath/wasm
+
+# Serve the demo (any static HTTP server works)
+npx serve examples/demo
+```
+
+Open the printed URL (usually `http://localhost:3000`) in your browser.
+
 ## Benchmarks
 
 ```bash

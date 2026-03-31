@@ -1,17 +1,26 @@
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use urath::{Chunk, ChunkNeighbors, GreedyMesher, MeshOutput, Mesher};
+use urath::{BlockRegistry, Chunk, ChunkNeighbors, GreedyMesher, MeshOutput, Mesher};
 
 fn bench_empty_chunk(c: &mut Criterion) {
     let chunk = Chunk::new_default();
     let neighbors = ChunkNeighbors::empty(32);
+    let registry = BlockRegistry::new();
     let mut mesher = GreedyMesher::new();
     let mut output = MeshOutput::new();
+    let mut transparent = MeshOutput::new();
 
     c.bench_function("greedy_mesh_empty_32", |b| {
         b.iter(|| {
             output.clear();
+            transparent.clear();
             mesher
-                .mesh(black_box(&chunk), &neighbors, &mut output)
+                .mesh(
+                    black_box(&chunk),
+                    &neighbors,
+                    &registry,
+                    &mut output,
+                    &mut transparent,
+                )
                 .unwrap();
         })
     });
@@ -27,14 +36,23 @@ fn bench_solid_chunk(c: &mut Criterion) {
         }
     }
     let neighbors = ChunkNeighbors::empty(32);
+    let registry = BlockRegistry::new();
     let mut mesher = GreedyMesher::new();
     let mut output = MeshOutput::with_capacity(6);
+    let mut transparent = MeshOutput::new();
 
     c.bench_function("greedy_mesh_solid_32", |b| {
         b.iter(|| {
             output.clear();
+            transparent.clear();
             mesher
-                .mesh(black_box(&chunk), &neighbors, &mut output)
+                .mesh(
+                    black_box(&chunk),
+                    &neighbors,
+                    &registry,
+                    &mut output,
+                    &mut transparent,
+                )
                 .unwrap();
         })
     });
@@ -50,14 +68,23 @@ fn bench_surface_chunk(c: &mut Criterion) {
         }
     }
     let neighbors = ChunkNeighbors::empty(32);
+    let registry = BlockRegistry::new();
     let mut mesher = GreedyMesher::new();
     let mut output = MeshOutput::with_capacity(4096);
+    let mut transparent = MeshOutput::new();
 
     c.bench_function("greedy_mesh_surface_32", |b| {
         b.iter(|| {
             output.clear();
+            transparent.clear();
             mesher
-                .mesh(black_box(&chunk), &neighbors, &mut output)
+                .mesh(
+                    black_box(&chunk),
+                    &neighbors,
+                    &registry,
+                    &mut output,
+                    &mut transparent,
+                )
                 .unwrap();
         })
     });
@@ -74,14 +101,23 @@ fn bench_noisy_surface(c: &mut Criterion) {
         }
     }
     let neighbors = ChunkNeighbors::empty(32);
+    let registry = BlockRegistry::new();
     let mut mesher = GreedyMesher::new();
     let mut output = MeshOutput::with_capacity(6000);
+    let mut transparent = MeshOutput::new();
 
     c.bench_function("greedy_mesh_noisy_32", |b| {
         b.iter(|| {
             output.clear();
+            transparent.clear();
             mesher
-                .mesh(black_box(&chunk), &neighbors, &mut output)
+                .mesh(
+                    black_box(&chunk),
+                    &neighbors,
+                    &registry,
+                    &mut output,
+                    &mut transparent,
+                )
                 .unwrap();
         })
     });

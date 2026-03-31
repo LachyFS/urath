@@ -378,14 +378,6 @@
   }
 </style>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://esm.sh/three@0.172.0",
-    "three/addons/": "https://esm.sh/three@0.172.0/examples/jsm/"
-  }
-}
-</script>
 </head>
 <body>
 
@@ -471,15 +463,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-import init, { WasmChunk, WasmChunkNeighbors, WasmGreedyMesher, WasmSurfaceNetsMesher, WasmTerrainGenerator } from './pkg/urath_wasm.js';
-
-// Face direction constants matching Rust Face enum
-const FACE_POS_X = 0;
-const FACE_NEG_X = 1;
-const FACE_POS_Y = 2;
-const FACE_NEG_Y = 3;
-const FACE_POS_Z = 4;
-const FACE_NEG_Z = 5;
+// WASM is loaded by workers — main thread only needs Three.js
 
 // ── Performance test mode ──────────────────────────
 const PERF_MODE = new URLSearchParams(window.location.search).has('perf');
@@ -487,8 +471,8 @@ const PERF_MODE = new URLSearchParams(window.location.search).has('perf');
 // ── Constants ──────────────────────────────────────
 const CHUNK_SIZE = 32;
 const WORLD_HEIGHT_CHUNKS = 8;   // vertical chunks (8 × 32 = 256 blocks tall)
-const RENDER_DISTANCE = 6;       // chunks from camera center (XZ)
-const UNLOAD_DISTANCE = 8;       // chunks before disposal
+const RENDER_DISTANCE = 12;      // chunks from camera center (XZ)
+const UNLOAD_DISTANCE = 14;      // chunks before disposal
 const CHUNKS_PER_FRAME = PERF_MODE ? 999 : 3; // unlimited in perf mode
 
 // ── Block IDs ─────────────────────────────────────
@@ -575,11 +559,15 @@ function createTerrainMaterial(textureArray) {
       in float blockId;
       in vec2 texUv;
 
+      uniform mat4 uShadowMatrix;
+      uniform float uShadowNormalBias;
+
       out float vAo;
       out float vBlockId;
       out vec3 vNormal;
       out vec3 vWorldPos;
       out vec2 vUv;
+      out vec4 vShadowCoord;
 
       void main() {
         vAo = ao;
@@ -589,6 +577,11 @@ function createTerrainMaterial(textureArray) {
         vUv = texUv;
         vec4 wp = modelMatrix * vec4(position, 1.0);
         vWorldPos = wp.xyz;
+
+        // Shadow coordinate with normal bias to reduce acne
+        vec4 shadowPos = wp + vec4(vNormal * uShadowNormalBias, 0.0);
+        vShadowCoord = uShadowMatrix * shadowPos;
+
         gl_Position = projectionMatrix * viewMatrix * wp;
       }
     `,
@@ -601,14 +594,37 @@ function createTerrainMaterial(textureArray) {
       uniform bool uWireframe;
       uniform bool uSmoothMode;
       uniform bool uBlendTextures;
+      uniform bool uAlphaTest;
+
+      uniform sampler2D uShadowMap;
+      uniform vec2 uShadowMapSize;
+      uniform float uShadowBias;
 
       in float vAo;
       in float vBlockId;
       in vec3 vNormal;
       in vec3 vWorldPos;
       in vec2 vUv;
+      in vec4 vShadowCoord;
 
       out vec4 fragColor;
+
+      float getShadow(vec4 shadowCoord) {
+        vec3 sc = shadowCoord.xyz / shadowCoord.w;
+        // Outside shadow frustum — fully lit
+        if (sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 || sc.z < 0.0) return 1.0;
+        float compareDepth = sc.z - uShadowBias;
+        // 3x3 PCF
+        vec2 texelSize = 1.0 / uShadowMapSize;
+        float shadow = 0.0;
+        for (int x = -1; x <= 1; x++) {
+          for (int y = -1; y <= 1; y++) {
+            float depth = texture(uShadowMap, sc.xy + vec2(float(x), float(y)) * texelSize).r;
+            shadow += step(compareDepth, depth);
+          }
+        }
+        return shadow / 9.0;
+      }
 
       // Map (blockId, faceType) to texture array layer.
       // faceType: 0=top, 1=side, 2=bottom
@@ -668,6 +684,7 @@ function createTerrainMaterial(textureArray) {
 
         // Sample texture: triplanar for smooth, tiling UVs for greedy
         vec3 color;
+        float texAlpha = 1.0;
         if (uSmoothMode) {
           color = triplanarSample(vWorldPos, n, layer);
 
@@ -695,18 +712,25 @@ function createTerrainMaterial(textureArray) {
           }
         } else {
           vec2 tilingUv = fract(vUv);
-          color = texture(uTextureArray, vec3(tilingUv, float(layer))).rgb;
+          vec4 texel = texture(uTextureArray, vec3(tilingUv, float(layer)));
+          color = texel.rgb;
+          texAlpha = texel.a;
         }
 
-        // Lighting
+        // Alpha test for transparent blocks (leaves, etc.)
+        if (uAlphaTest && texAlpha < 0.5) discard;
+
+        // Lighting with directional shadows
         vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
         float ndotl = dot(n, lightDir);
-        float diffuse = 0.35 + 0.65 * max(ndotl, 0.0);
+        float shadow = getShadow(vShadowCoord);
+        float ambient = 0.35;
+        float directional = 0.65 * max(ndotl, 0.0) * shadow;
 
         float aoFactor = 0.55 + 0.45 * vAo;
         float skyFill = 0.08 * max(n.y, 0.0);
 
-        color *= (diffuse * aoFactor + skyFill);
+        color *= ((ambient + directional) * aoFactor + skyFill);
 
         // Water tint
         if (bid == 5) {
@@ -717,14 +741,14 @@ function createTerrainMaterial(textureArray) {
         // Fog centered on camera target (disabled in wireframe mode)
         if (!uWireframe) {
           float dist = length(vWorldPos.xz - uCameraTarget.xz);
-          float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.5).toFixed(1)};
-          float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.85).toFixed(1)};
+          float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.7).toFixed(1)};
+          float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.95).toFixed(1)};
           float fog = 1.0 - smoothstep(fogStart, fogEnd, dist);
-          vec3 fogColor = vec3(0.024, 0.024, 0.03);
+          vec3 fogColor = vec3(0.529, 0.808, 0.922);
           color = mix(fogColor, color, fog);
         }
 
-        fragColor = vec4(color, 1.0);
+        fragColor = vec4(color, texAlpha);
       }
     `,
     uniforms: {
@@ -733,30 +757,23 @@ function createTerrainMaterial(textureArray) {
       uWireframe: { value: false },
       uSmoothMode: { value: false },
       uBlendTextures: { value: false },
+      uAlphaTest: { value: false },
+      uShadowMap: { value: null },
+      uShadowMatrix: { value: new THREE.Matrix4() },
+      uShadowMapSize: { value: new THREE.Vector2(2048, 2048) },
+      uShadowBias: { value: 0.002 },
+      uShadowNormalBias: { value: 0.3 },
     },
     side: THREE.DoubleSide,
   });
 }
 
-// ── Build geometry from mesh result ────────────────
-function buildGeometry(meshResult) {
-  const positions = meshResult.positions();
-  const normals = meshResult.normals();
-  const aoData = meshResult.ao();
-  const blockIds = meshResult.block_ids();
-  const uvs = meshResult.uvs();
-  const indices = meshResult.indices();
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-  geometry.setAttribute('ao', new THREE.BufferAttribute(aoData, 1));
-  geometry.setAttribute('blockId', new THREE.BufferAttribute(blockIds, 1));
-  geometry.setAttribute('texUv', new THREE.BufferAttribute(uvs, 2));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeBoundingBox();
-
-  return geometry;
+function createTransparentMaterial(textureArray) {
+  const mat = createTerrainMaterial(textureArray);
+  mat.uniforms.uAlphaTest.value = true;
+  mat.transparent = true;
+  mat.depthWrite = true;
+  return mat;
 }
 
 // ── Scene setup ────────────────────────────────────
@@ -764,7 +781,7 @@ function createScene(container) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x060608);
+  renderer.setClearColor(0x87CEEB);
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
@@ -830,35 +847,100 @@ function updateStats(renderer, chunkManager) {
   document.getElementById('stat-chunks').innerHTML = fmt(chunkManager.columnMeshes.size);
   document.getElementById('stat-verts').innerHTML = fmt(renderer.info.render.triangles * 3);
   document.getElementById('stat-tris').innerHTML = fmt(renderer.info.render.triangles);
-  document.getElementById('stat-time').innerHTML = chunkManager.pending.size > 0 ? fmt(chunkManager.pending.size) : '0';
+  document.getElementById('stat-time').innerHTML = fmt(chunkManager.pending.size + chunkManager.inflight.size);
 }
 
-// ── Chunk Manager ──────────────────────────────────
-// Merges all Y-chunks in a column into a single mesh to reduce draw calls.
+// ── Worker Pool ───────────────────────────────────
+class MeshWorkerPool {
+  constructor(size) {
+    this.workers = [];
+    this.idle = [];
+    this.queue = [];
+    this.readyCount = 0;
+    this.size = size;
+
+    for (let i = 0; i < size; i++) {
+      const w = new Worker('./mesh-worker.js', { type: 'module' });
+      w.onmessage = (e) => this._onMessage(i, e.data);
+      w.pending = null; // { resolve, reject }
+      this.workers.push(w);
+    }
+  }
+
+  get ready() { return this.readyCount >= this.size; }
+
+  _onMessage(idx, msg) {
+    const w = this.workers[idx];
+    if (msg.type === 'ready') {
+      this.readyCount++;
+      this.idle.push(idx);
+      this._drain();
+      return;
+    }
+    if (w.pending) {
+      w.pending.resolve(msg);
+      w.pending = null;
+    }
+    this.idle.push(idx);
+    this._drain();
+  }
+
+  _drain() {
+    while (this.idle.length > 0 && this.queue.length > 0) {
+      const idx = this.idle.shift();
+      const { message, transferables, resolve, reject } = this.queue.shift();
+      this.workers[idx].pending = { resolve, reject };
+      this.workers[idx].postMessage(message, transferables || []);
+    }
+  }
+
+  send(message, transferables) {
+    return new Promise((resolve, reject) => {
+      this.queue.push({ message, transferables, resolve, reject });
+      this._drain();
+    });
+  }
+}
+
+// ── Chunk Manager (worker-based) ──────────────────
+// Terrain gen + meshing happen off the main thread.
 class ChunkManager {
-  constructor(scene, material, mesher, terrainGen) {
+  constructor(scene, material, transparentMaterial) {
     this.scene = scene;
     this.material = material;
-    this.mesher = mesher;
-    this.terrainGen = terrainGen;
+    this.transparentMaterial = transparentMaterial;
+    this.mesherMode = 'greedy';
 
-    // chunkData: Map<chunkKey, WasmChunk>
-    this.chunkData = new Map();
-    // columnMeshes: Map<colKey, THREE.Mesh> — one merged mesh per XZ column
+    const poolSize = Math.max(2, Math.min(navigator.hardwareConcurrency - 1, 6));
+    this.pool = new MeshWorkerPool(poolSize);
+
+    // borderData: Map<chunkKey, { 0: Uint16Array, ... 5: Uint16Array }>
+    this.borderData = new Map();
+    // blockData: Map<chunkKey, Uint16Array> — raw block arrays for editing
+    this.blockData = new Map();
+    // columnMeshes: Map<colKey, THREE.Mesh>
     this.columnMeshes = new Map();
+    // columnTransparentMeshes: Map<colKey, THREE.Mesh>
+    this.columnTransparentMeshes = new Map();
+    // inflight: Set<colKey> — columns currently being generated by workers
+    this.inflight = new Set();
     // pending: Set<colKey> — columns queued for generation
     this.pending = new Set();
+    // loadedCols: Set<colKey> — columns fully generated and meshed
+    this.loadedCols = new Set();
 
     // Perf instrumentation
-    this.perfGenTimes = [];   // terrain generation times (ms per chunk)
-    this.perfMeshTimes = [];  // meshing times (ms per column)
+    this.perfGenTimes = [];
+    this.perfMeshTimes = [];
   }
 
   key(cx, cy, cz) { return `${cx},${cy},${cz}`; }
   colKey(cx, cz) { return `${cx},${cz}`; }
 
   update(cameraCX, cameraCZ) {
-    // 1. Determine which columns should be loaded
+    if (!this.pool.ready) return;
+
+    // 1. Determine needed columns
     const neededCols = new Set();
     for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
       for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
@@ -869,41 +951,44 @@ class ChunkManager {
 
     // 2. Queue missing columns
     for (const ck of neededCols) {
-      const [cx, cz] = ck.split(',').map(Number);
-      if (!this.chunkData.has(this.key(cx, 0, cz)) && !this.pending.has(ck)) {
+      if (!this.loadedCols.has(ck) && !this.inflight.has(ck) && !this.pending.has(ck)) {
         this.pending.add(ck);
       }
     }
 
-    // 3. Process a batch of pending columns
-    let processed = 0;
+    // 3. Dispatch pending to workers (up to CHUNKS_PER_FRAME)
+    let dispatched = 0;
     for (const ck of this.pending) {
-      if (processed >= CHUNKS_PER_FRAME) break;
+      if (dispatched >= CHUNKS_PER_FRAME) break;
       const [cx, cz] = ck.split(',').map(Number);
-
-      for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
-        const t0 = performance.now();
-        this.chunkData.set(this.key(cx, cy, cz), this.terrainGen.generate(cx, cy, cz));
-        this.perfGenTimes.push(performance.now() - t0);
-      }
       this.pending.delete(ck);
-      processed++;
+      this.inflight.add(ck);
+      dispatched++;
 
-      this._meshColumn(cx, cz);
-      this._remeshNeighborColumns(cx, cz);
+      // Gather neighbor borders for X/Z directions
+      const neighborBorders = this._gatherNeighborBorders(cx, cz);
+      const t0 = performance.now();
+
+      this.pool.send({
+        type: 'generate',
+        cx, cz,
+        neighborBorders,
+        mesherMode: this.mesherMode,
+      }).then((msg) => {
+        this.perfMeshTimes.push(performance.now() - t0);
+        this.inflight.delete(ck);
+        this._handleColumnReady(msg);
+      });
     }
 
     // 4. Unload distant columns
-    const unloadCols = new Set();
-    for (const [k] of this.chunkData) {
-      const [cx, , cz] = k.split(',').map(Number);
-      const ck = this.colKey(cx, cz);
-      if (!neededCols.has(ck) && !unloadCols.has(ck)) {
-        const dx = cx - cameraCX;
-        const dz = cz - cameraCZ;
-        if (dx * dx + dz * dz > UNLOAD_DISTANCE * UNLOAD_DISTANCE) {
-          unloadCols.add(ck);
-        }
+    const unloadCols = [];
+    for (const ck of this.loadedCols) {
+      const [cx, cz] = ck.split(',').map(Number);
+      const dx = cx - cameraCX;
+      const dz = cz - cameraCZ;
+      if (dx * dx + dz * dz > UNLOAD_DISTANCE * UNLOAD_DISTANCE) {
+        unloadCols.push(ck);
       }
     }
     for (const ck of unloadCols) {
@@ -911,125 +996,129 @@ class ChunkManager {
     }
   }
 
-  // Mesh all Y-chunks in a column and merge into a single geometry.
-  _meshColumn(cx, cz) {
-    const meshT0 = performance.now();
-    const ck = this.colKey(cx, cz);
-    this._removeColumnMesh(ck);
-
-    // Mesh each Y-chunk, collect non-empty results
-    const slices = [];
-    let totalVerts = 0;
-    let totalIdx = 0;
-
+  _gatherNeighborBorders(cx, cz) {
+    const borders = {};
     for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
-      const chunk = this.chunkData.get(this.key(cx, cy, cz));
-      if (!chunk) continue;
-
-      const neighbors = new WasmChunkNeighbors(CHUNK_SIZE);
-      const px = this.chunkData.get(this.key(cx + 1, cy, cz));
-      const nx = this.chunkData.get(this.key(cx - 1, cy, cz));
-      const py = this.chunkData.get(this.key(cx, cy + 1, cz));
-      const ny = this.chunkData.get(this.key(cx, cy - 1, cz));
-      const pz = this.chunkData.get(this.key(cx, cy, cz + 1));
-      const nz = this.chunkData.get(this.key(cx, cy, cz - 1));
-      if (px) neighbors.set_neighbor(FACE_POS_X, px);
-      if (nx) neighbors.set_neighbor(FACE_NEG_X, nx);
-      if (py) neighbors.set_neighbor(FACE_POS_Y, py);
-      if (ny) neighbors.set_neighbor(FACE_NEG_Y, ny);
-      if (pz) neighbors.set_neighbor(FACE_POS_Z, pz);
-      if (nz) neighbors.set_neighbor(FACE_NEG_Z, nz);
-
-      const result = this.mesher.mesh_with_neighbors(chunk, neighbors);
-      neighbors.free();
-
-      if (!result.is_empty()) {
-        const vc = result.vertex_count();
-        const ic = result.index_count();
-        slices.push({
-          cy,
-          positions: result.positions(),
-          normals: result.normals(),
-          ao: result.ao(),
-          blockIds: result.block_ids(),
-          uvs: result.uvs(),
-          indices: result.indices(),
-          vc, ic,
-        });
-        totalVerts += vc;
-        totalIdx += ic;
-      }
-      result.free();
-    }
-
-    if (slices.length === 0) {
-      this.perfMeshTimes.push(performance.now() - meshT0);
-      return;
-    }
-
-    // Merge into single buffers
-    const positions = new Float32Array(totalVerts * 3);
-    const normals = new Float32Array(totalVerts * 3);
-    const ao = new Float32Array(totalVerts);
-    const blockIds = new Float32Array(totalVerts);
-    const uvs = new Float32Array(totalVerts * 2);
-    const indices = new Uint32Array(totalIdx);
-
-    let vOff = 0;
-    let iOff = 0;
-
-    for (const s of slices) {
-      const yOffset = s.cy * CHUNK_SIZE;
-      const p = s.positions;
-      const base3 = vOff * 3;
-
-      // Copy positions, then fixup Y with offset
-      positions.set(p, base3);
-      if (yOffset !== 0) {
-        for (let i = 1; i < p.length; i += 3) {
-          positions[base3 + i] += yOffset;
+      for (const [dcx, dcz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+        const nk = this.key(cx + dcx, cy, cz + dcz);
+        if (this.borderData.has(nk)) {
+          borders[nk] = this.borderData.get(nk);
         }
       }
+    }
+    return borders;
+  }
 
-      normals.set(s.normals, base3);
-      ao.set(s.ao, vOff);
-      blockIds.set(s.blockIds, vOff);
-      uvs.set(s.uvs, vOff * 2);
+  _handleColumnReady(msg) {
+    const { cx, cz, mesh, transparentMesh, borders, blockData } = msg;
+    const ck = this.colKey(cx, cz);
 
-      // Copy indices with vertex offset
-      const idx = s.indices;
-      for (let i = 0; i < idx.length; i++) {
-        indices[iOff + i] = idx[i] + vOff;
+    // Store borders and block data
+    for (const [key, faceData] of Object.entries(borders)) {
+      this.borderData.set(key, faceData);
+    }
+    if (blockData) {
+      for (const [key, data] of Object.entries(blockData)) {
+        this.blockData.set(key, data);
       }
-
-      vOff += s.vc;
-      iOff += s.ic;
     }
 
+    this.loadedCols.add(ck);
+
+    // Create Three.js meshes (opaque + transparent)
+    this._removeColumnMesh(ck);
+    if (mesh) {
+      this._createMesh(ck, cx, cz, mesh);
+    }
+    if (transparentMesh) {
+      this._createTransparentMesh(ck, cx, cz, transparentMesh);
+    }
+
+    // Queue neighbor remeshes (they now have updated border data)
+    this._remeshNeighborColumns(cx, cz);
+  }
+
+  _createMesh(ck, cx, cz, mesh) {
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    geometry.setAttribute('ao', new THREE.BufferAttribute(ao, 1));
-    geometry.setAttribute('blockId', new THREE.BufferAttribute(blockIds, 1));
-    geometry.setAttribute('texUv', new THREE.BufferAttribute(uvs, 2));
-    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+    geometry.setAttribute('ao', new THREE.BufferAttribute(mesh.ao, 1));
+    geometry.setAttribute('blockId', new THREE.BufferAttribute(mesh.blockIds, 1));
+    geometry.setAttribute('texUv', new THREE.BufferAttribute(mesh.uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
     geometry.computeBoundingBox();
 
-    const mesh = new THREE.Mesh(geometry, this.material);
-    mesh.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-    this.scene.add(mesh);
-    this.columnMeshes.set(ck, mesh);
-    this.perfMeshTimes.push(performance.now() - meshT0);
+    const m = new THREE.Mesh(geometry, this.material);
+    m.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+    this.scene.add(m);
+    this.columnMeshes.set(ck, m);
+  }
+
+  _createTransparentMesh(ck, cx, cz, mesh) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
+    geometry.setAttribute('ao', new THREE.BufferAttribute(mesh.ao, 1));
+    geometry.setAttribute('blockId', new THREE.BufferAttribute(mesh.blockIds, 1));
+    geometry.setAttribute('texUv', new THREE.BufferAttribute(mesh.uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+    geometry.computeBoundingBox();
+
+    const m = new THREE.Mesh(geometry, this.transparentMaterial);
+    m.renderOrder = 1;
+    m.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
+    this.scene.add(m);
+    this.columnTransparentMeshes.set(ck, m);
   }
 
   _remeshNeighborColumns(cx, cz) {
     for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
       const ncx = cx + dx, ncz = cz + dz;
       const nck = this.colKey(ncx, ncz);
-      if (this.chunkData.has(this.key(ncx, 0, ncz))) {
-        this._meshColumn(ncx, ncz);
+      if (this.loadedCols.has(nck) && !this.inflight.has(nck)) {
+        this._remeshColumnAsync(ncx, ncz);
       }
     }
+  }
+
+  _remeshColumnAsync(cx, cz) {
+    const ck = this.colKey(cx, cz);
+    this.inflight.add(ck);
+
+    // Gather block data for this column
+    const colBlockData = {};
+    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
+      const key = this.key(cx, cy, cz);
+      if (this.blockData.has(key)) {
+        colBlockData[key] = this.blockData.get(key);
+      }
+    }
+
+    const neighborBorders = this._gatherNeighborBorders(cx, cz);
+
+    this.pool.send({
+      type: 'remesh',
+      cx, cz,
+      blockData: colBlockData,
+      neighborBorders,
+      mesherMode: this.mesherMode,
+    }).then((msg) => {
+      this.inflight.delete(ck);
+      const { mesh, transparentMesh, borders } = msg;
+
+      // Update borders
+      for (const [key, faceData] of Object.entries(borders)) {
+        this.borderData.set(key, faceData);
+      }
+
+      this._removeColumnMesh(ck);
+      if (mesh) {
+        this._createMesh(ck, cx, cz, mesh);
+      }
+      if (transparentMesh) {
+        this._createTransparentMesh(ck, cx, cz, transparentMesh);
+      }
+    });
   }
 
   _removeColumnMesh(ck) {
@@ -1039,24 +1128,28 @@ class ChunkManager {
       existing.geometry.dispose();
       this.columnMeshes.delete(ck);
     }
+    const existingT = this.columnTransparentMeshes.get(ck);
+    if (existingT) {
+      this.scene.remove(existingT);
+      existingT.geometry.dispose();
+      this.columnTransparentMeshes.delete(ck);
+    }
   }
 
   _unloadColumn(ck) {
     this._removeColumnMesh(ck);
     const [cx, cz] = ck.split(',').map(Number);
+    this.loadedCols.delete(ck);
     for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
       const k = this.key(cx, cy, cz);
-      const chunk = this.chunkData.get(k);
-      if (chunk) {
-        chunk.free();
-        this.chunkData.delete(k);
-      }
+      this.borderData.delete(k);
+      this.blockData.delete(k);
     }
   }
 
   // Remesh a single column (used by block editing)
   remeshColumn(cx, cz) {
-    this._meshColumn(cx, cz);
+    this._remeshColumnAsync(cx, cz);
   }
 }
 
@@ -1116,50 +1209,79 @@ function worldToChunkLocal(wx, wy, wz) {
   return { cx, cy, cz, lx, ly, lz };
 }
 
-// Batch edit: group blocks by chunk, use set_blocks, remesh each chunk once.
+// Batch edit: group blocks by chunk, modify blockData arrays, remesh.
 function batchEditBlocks(chunkManager, edits) {
   const worldHeight = WORLD_HEIGHT_CHUNKS * CHUNK_SIZE;
+  const s = CHUNK_SIZE;
   // Group edits by chunk key
-  const byChunk = new Map(); // key -> { cx, cy, cz, chunk, edits: [x,y,z,id,...], boundaries: Set }
+  const byChunk = new Map();
   for (const { x: wx, y: wy, z: wz, blockId } of edits) {
     if (wy < 0 || wy >= worldHeight) continue;
     const { cx, cy, cz, lx, ly, lz } = worldToChunkLocal(wx, wy, wz);
     const k = chunkManager.key(cx, cy, cz);
-    const chunk = chunkManager.chunkData.get(k);
-    if (!chunk) continue;
+    const blocks = chunkManager.blockData.get(k);
+    if (!blocks) continue;
 
     if (!byChunk.has(k)) {
-      byChunk.set(k, { cx, cy, cz, chunk, edits: [], boundaries: new Set() });
+      byChunk.set(k, { cx, cy, cz, edits: [], boundaries: new Set() });
     }
     const entry = byChunk.get(k);
-    entry.edits.push(lx, ly, lz, blockId);
+    entry.edits.push({ lx, ly, lz, blockId });
 
-    // Track which boundary neighbors need remeshing
     if (lx === 0)              entry.boundaries.add(chunkManager.key(cx - 1, cy, cz));
-    if (lx === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx + 1, cy, cz));
+    if (lx === s - 1)          entry.boundaries.add(chunkManager.key(cx + 1, cy, cz));
     if (ly === 0)              entry.boundaries.add(chunkManager.key(cx, cy - 1, cz));
-    if (ly === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cy + 1, cz));
+    if (ly === s - 1)          entry.boundaries.add(chunkManager.key(cx, cy + 1, cz));
     if (lz === 0)              entry.boundaries.add(chunkManager.key(cx, cy, cz - 1));
-    if (lz === CHUNK_SIZE - 1) entry.boundaries.add(chunkManager.key(cx, cy, cz + 1));
+    if (lz === s - 1)          entry.boundaries.add(chunkManager.key(cx, cy, cz + 1));
   }
 
-  // Apply edits and collect all columns that need remeshing
+  // Apply edits to blockData arrays and update borders
   const remeshCols = new Set();
-  for (const [k, { cx, cy, cz, chunk, edits, boundaries }] of byChunk) {
-    chunk.set_blocks(new Uint32Array(edits));
+  for (const [k, { cx, cy, cz, edits: chunkEdits, boundaries }] of byChunk) {
+    const blocks = chunkManager.blockData.get(k);
+    for (const { lx, ly, lz, blockId } of chunkEdits) {
+      blocks[lx + ly * s + lz * s * s] = blockId;
+    }
+    // Update border data for this chunk (neighbors will pick it up)
+    const borderObj = {};
+    for (let face = 0; face < 6; face++) {
+      borderObj[face] = extractBorderFromArray(blocks, s, face);
+    }
+    chunkManager.borderData.set(k, borderObj);
+
     remeshCols.add(chunkManager.colKey(cx, cz));
     for (const bk of boundaries) {
-      if (!chunkManager.chunkData.has(bk)) continue;
+      if (!chunkManager.blockData.has(bk)) continue;
       const [bcx, , bcz] = bk.split(',').map(Number);
       remeshCols.add(chunkManager.colKey(bcx, bcz));
     }
   }
 
-  // Remesh each affected column exactly once
   for (const ck of remeshCols) {
     const [cx, cz] = ck.split(',').map(Number);
     chunkManager.remeshColumn(cx, cz);
   }
+}
+
+// Extract a face border from a flat block array (matches Chunk::extract_border)
+function extractBorderFromArray(blocks, s, face) {
+  const border = new Uint16Array(s * s);
+  for (let a = 0; a < s; a++) {
+    for (let b = 0; b < s; b++) {
+      let x, y, z;
+      switch (face) {
+        case 0: x = s - 1; y = a; z = b; break; // PosX
+        case 1: x = 0;     y = a; z = b; break; // NegX
+        case 2: x = b;     y = s - 1; z = a; break; // PosY
+        case 3: x = b;     y = 0;     z = a; break; // NegY
+        case 4: x = b;     y = a; z = s - 1; break; // PosZ
+        case 5: x = b;     y = a; z = 0;     break; // NegZ
+      }
+      border[b + a * s] = blocks[x + y * s + z * s * s];
+    }
+  }
+  return border;
 }
 
 // Single-block edit (convenience wrapper)
@@ -1178,7 +1300,10 @@ function brushEdit(chunkManager, center, blockId, normal) {
 
 function getTargetBlock(raycaster, mouse, camera, chunkManager) {
   raycaster.setFromCamera(mouse, camera);
-  const meshes = Array.from(chunkManager.columnMeshes.values());
+  const meshes = [
+    ...chunkManager.columnMeshes.values(),
+    ...chunkManager.columnTransparentMeshes.values(),
+  ];
   const hits = raycaster.intersectObjects(meshes, false);
   if (hits.length === 0) return null;
 
@@ -1522,37 +1647,96 @@ function drawFrameGraph(frameTimes, report) {
 
 // ── Main ───────────────────────────────────────────
 async function main() {
-  await init();
-
   const textureArray = await loadTextureArray();
 
   const container = document.getElementById('scene-container');
   const { renderer, scene, camera, controls } = createScene(container);
 
   const material = createTerrainMaterial(textureArray);
-  const greedyMesher = new WasmGreedyMesher(CHUNK_SIZE);
-  const smoothMesher = new WasmSurfaceNetsMesher(CHUNK_SIZE);
-  let mesherMode = 'greedy'; // 'greedy' or 'smooth'
-  const terrainGen = new WasmTerrainGenerator();
-  const chunkManager = new ChunkManager(scene, material, greedyMesher, terrainGen);
+  const transparentMaterial = createTransparentMaterial(textureArray);
+
+  // ── Shadow map setup ──────────────────────────────
+  const SHADOW_MAP_SIZE = 2048;
+  const SHADOW_FRUSTUM = 128; // half-size in world units
+
+  const shadowTarget = new THREE.WebGLRenderTarget(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  shadowTarget.depthTexture = new THREE.DepthTexture(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
+  shadowTarget.depthTexture.type = THREE.UnsignedIntType;
+
+  const shadowCamera = new THREE.OrthographicCamera(
+    -SHADOW_FRUSTUM, SHADOW_FRUSTUM, SHADOW_FRUSTUM, -SHADOW_FRUSTUM, 1, 512
+  );
+  const lightDir = new THREE.Vector3(0.4, 0.8, 0.3).normalize();
+
+  const depthMaterial = new THREE.MeshBasicMaterial({ colorWrite: false });
+
+  // Bias matrix: NDC [-1,1] → UV [0,1]
+  const shadowBiasMatrix = new THREE.Matrix4().set(
+    0.5, 0.0, 0.0, 0.5,
+    0.0, 0.5, 0.0, 0.5,
+    0.0, 0.0, 0.5, 0.5,
+    0.0, 0.0, 0.0, 1.0,
+  );
+  const shadowMatrix = new THREE.Matrix4();
+  const texelSize = (SHADOW_FRUSTUM * 2) / SHADOW_MAP_SIZE;
+
+  // Wire shadow map into both materials
+  material.uniforms.uShadowMap.value = shadowTarget.depthTexture;
+  transparentMaterial.uniforms.uShadowMap.value = shadowTarget.depthTexture;
+
+  function updateShadow(camPos) {
+    // Position shadow camera along light direction from player
+    shadowCamera.position.copy(camPos).addScaledVector(lightDir, 200);
+    shadowCamera.lookAt(camPos);
+    shadowCamera.updateMatrixWorld(true);
+
+    // Snap to texel grid to prevent shadow shimmer
+    const lightView = shadowCamera.matrixWorldInverse;
+    const projected = camPos.clone().applyMatrix4(lightView);
+    projected.x = Math.floor(projected.x / texelSize) * texelSize;
+    projected.y = Math.floor(projected.y / texelSize) * texelSize;
+    const snapped = projected.applyMatrix4(shadowCamera.matrixWorld);
+    shadowCamera.position.copy(snapped).addScaledVector(lightDir, 200);
+    shadowCamera.lookAt(snapped);
+    shadowCamera.updateMatrixWorld(true);
+
+    // Compute shadow matrix: biasMatrix * proj * view
+    shadowMatrix.copy(shadowBiasMatrix)
+      .multiply(shadowCamera.projectionMatrix)
+      .multiply(shadowCamera.matrixWorldInverse);
+
+    material.uniforms.uShadowMatrix.value.copy(shadowMatrix);
+    transparentMaterial.uniforms.uShadowMatrix.value.copy(shadowMatrix);
+  }
+
+  function renderShadowPass() {
+    scene.overrideMaterial = depthMaterial;
+    renderer.setRenderTarget(shadowTarget);
+    renderer.clear();
+    renderer.render(scene, shadowCamera);
+    scene.overrideMaterial = null;
+    renderer.setRenderTarget(null);
+  }
+
+  const chunkManager = new ChunkManager(scene, material, transparentMaterial);
   const mover = new KeyboardMover(camera);
 
   // Queue for gradual remesh when toggling mesher mode
   let remeshQueue = [];
 
   function toggleMesherMode() {
-    if (mesherMode === 'greedy') {
-      mesherMode = 'smooth';
-      chunkManager.mesher = smoothMesher;
+    if (chunkManager.mesherMode === 'greedy') {
+      chunkManager.mesherMode = 'smooth';
       material.uniforms.uSmoothMode.value = true;
+      transparentMaterial.uniforms.uSmoothMode.value = true;
     } else {
-      mesherMode = 'greedy';
-      chunkManager.mesher = greedyMesher;
+      chunkManager.mesherMode = 'greedy';
       material.uniforms.uSmoothMode.value = false;
+      transparentMaterial.uniforms.uSmoothMode.value = false;
     }
     // Queue all loaded columns for gradual remesh (3 per frame)
     remeshQueue = [];
-    for (const [ck] of chunkManager.columnMeshes) {
+    for (const ck of chunkManager.loadedCols) {
       remeshQueue.push(ck);
     }
   }
@@ -1562,7 +1746,7 @@ async function main() {
     for (let i = 0; i < batch; i++) {
       const ck = remeshQueue.shift();
       const [cx, cz] = ck.split(',').map(Number);
-      chunkManager._meshColumn(cx, cz);
+      chunkManager.remeshColumn(cx, cz);
     }
   }
 
@@ -1644,12 +1828,15 @@ async function main() {
     } else if (e.code === 'KeyF') {
       material.wireframe = !material.wireframe;
       material.uniforms.uWireframe.value = material.wireframe;
+      transparentMaterial.wireframe = material.wireframe;
+      transparentMaterial.uniforms.uWireframe.value = material.wireframe;
       document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
     } else if (e.code === 'KeyM') {
       toggleMesherMode();
     } else if (e.code === 'KeyT') {
-      if (mesherMode === 'smooth') {
+      if (chunkManager.mesherMode === 'smooth') {
         material.uniforms.uBlendTextures.value = !material.uniforms.uBlendTextures.value;
+        transparentMaterial.uniforms.uBlendTextures.value = material.uniforms.uBlendTextures.value;
       }
     } else if (e.key === '[') {
       brushRadius = Math.max(1, brushRadius - 1);
@@ -1691,6 +1878,8 @@ async function main() {
     e.stopPropagation();
     material.wireframe = !material.wireframe;
     material.uniforms.uWireframe.value = material.wireframe;
+    transparentMaterial.wireframe = material.wireframe;
+    transparentMaterial.uniforms.uWireframe.value = material.wireframe;
     e.target.textContent = material.wireframe ? 'ON' : 'OFF';
   });
 
@@ -1722,9 +1911,12 @@ async function main() {
       const cameraCX = Math.floor(camPos.x / CHUNK_SIZE);
       const cameraCZ = Math.floor(camPos.z / CHUNK_SIZE);
       material.uniforms.uCameraTarget.value.copy(camPos);
+      transparentMaterial.uniforms.uCameraTarget.value.copy(camPos);
 
       chunkManager.update(cameraCX, cameraCZ);
 
+      updateShadow(camPos);
+      renderShadowPass();
       renderer.render(scene, camera);
 
       const frameMs = performance.now() - now;
@@ -1778,12 +1970,11 @@ async function main() {
 
     // Update fog center to camera position
     material.uniforms.uCameraTarget.value.copy(camPos);
+    transparentMaterial.uniforms.uCameraTarget.value.copy(camPos);
 
-    if (cameraCX !== lastCameraCX || cameraCZ !== lastCameraCZ || chunkManager.pending.size > 0) {
-      chunkManager.update(cameraCX, cameraCZ);
-      lastCameraCX = cameraCX;
-      lastCameraCZ = cameraCZ;
-    }
+    chunkManager.update(cameraCX, cameraCZ);
+    lastCameraCX = cameraCX;
+    lastCameraCZ = cameraCZ;
 
     // Process gradual remesh queue (mesher mode toggle)
     if (remeshQueue.length > 0) {
@@ -1800,6 +1991,9 @@ async function main() {
       hlGroup.visible = false;
     }
 
+    // Shadow pass + main render
+    updateShadow(camPos);
+    renderShadowPass();
     renderer.render(scene, camera);
 
     // Stats update after render so renderer.info reflects this frame
