@@ -19,6 +19,10 @@ pub struct SurfaceNetsMesher {
     /// Vertex index per cell: size³. `u32::MAX` = no vertex.
     vertex_indices: Vec<u32>,
     chunk_size: usize,
+    /// Distance (in voxels) over which smoothed density blends back to
+    /// binary near chunk boundaries.  Higher values produce smoother
+    /// cross-chunk transitions but cost more interior smoothing.
+    blend_dist: f32,
 }
 
 const NO_VERTEX: u32 = u32::MAX;
@@ -65,7 +69,13 @@ impl SurfaceNetsMesher {
             // (size+1)³ grid: covers cell positions -1..size-1 with +1 offset
             vertex_indices: vec![NO_VERTEX; (size + 1) * (size + 1) * (size + 1)],
             chunk_size: size,
+            blend_dist: 4.0,
         }
+    }
+
+    /// Set the blend distance (in voxels) for the boundary smoothing ramp.
+    pub fn set_blend_dist(&mut self, dist: f32) {
+        self.blend_dist = dist;
     }
 
     /// Build padded density field from chunk block data + neighbor borders.
@@ -172,27 +182,10 @@ impl SurfaceNetsMesher {
         // Smooth the binary density field to produce gradients at the surface.
         // 2 passes of 6-neighbor averaging turns the sharp -1/+1 step into a
         // smooth transition, giving Surface Nets continuous edge crossings.
-        // Ping-pong between buffers: one copy instead of two.
-        self.density_scratch.copy_from_slice(&self.density);
+        // Ping-pong between density and density_scratch; result lands in density
+        // with no extra copy or swap.
 
-        // Pass 1: read density_scratch → write density
-        for z in 1..ps - 1 {
-            for y in 1..ps - 1 {
-                for x in 1..ps - 1 {
-                    let pi = x + y * ps + z * ps2;
-                    self.density[pi] = (self.density_scratch[pi] * 2.0
-                        + self.density_scratch[pi - 1]
-                        + self.density_scratch[pi + 1]
-                        + self.density_scratch[pi - ps]
-                        + self.density_scratch[pi + ps]
-                        + self.density_scratch[pi - ps2]
-                        + self.density_scratch[pi + ps2])
-                        / 8.0;
-                }
-            }
-        }
-
-        // Pass 2: read density → write density_scratch
+        // Pass 1: read density → write density_scratch
         for z in 1..ps - 1 {
             for y in 1..ps - 1 {
                 for x in 1..ps - 1 {
@@ -209,15 +202,29 @@ impl SurfaceNetsMesher {
             }
         }
 
-        // Final result is in density_scratch; swap so density has the result
-        std::mem::swap(&mut self.density, &mut self.density_scratch);
+        // Pass 2: read density_scratch → write density
+        for z in 1..ps - 1 {
+            for y in 1..ps - 1 {
+                for x in 1..ps - 1 {
+                    let pi = x + y * ps + z * ps2;
+                    self.density[pi] = (self.density_scratch[pi] * 2.0
+                        + self.density_scratch[pi - 1]
+                        + self.density_scratch[pi + 1]
+                        + self.density_scratch[pi - ps]
+                        + self.density_scratch[pi + ps]
+                        + self.density_scratch[pi - ps2]
+                        + self.density_scratch[pi + ps2])
+                        / 8.0;
+                }
+            }
+        }
 
         // Blend smoothed density back to binary near chunk boundaries.
         // Both the padding layer (position -1/size) AND the first/last chunk
         // positions (0/size-1) are forced fully binary so neighboring chunks
         // agree on density at their shared boundary. The blend then ramps
         // from binary to smoothed over ~4 voxels inward.
-        let blend_dist = 4.0f32;
+        let blend_dist = self.blend_dist;
         for z in 0..ps {
             for y in 0..ps {
                 for x in 0..ps {
@@ -284,31 +291,23 @@ impl SurfaceNetsMesher {
             + (d_nz < 0.0) as u32
             + (d_pz < 0.0) as u32;
 
-        // 12 edge neighbors
-        let psi = ps as isize;
-        let ps2i = ps2 as isize;
-        solid += (self.density[(pi as isize - 1 - psi) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 - psi) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 + psi) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 + psi) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - psi + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + psi + ps2i) as usize] < 0.0) as u32;
-
-        // 8 corner neighbors
-        solid += (self.density[(pi as isize - 1 - psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 - psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 + psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 + psi - ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 - psi + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 - psi + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize - 1 + psi + ps2i) as usize] < 0.0) as u32;
-        solid += (self.density[(pi as isize + 1 + psi + ps2i) as usize] < 0.0) as u32;
+        // Remaining 20 neighbors (12 edge + 8 corner).
+        // Safe because px/py/pz are clamped to [1, ps-2], so ±1 stays in [0, ps-1].
+        for dz in 0u32..3 {
+            let nz = (pz + dz as usize - 1) * ps2;
+            for dy in 0u32..3 {
+                let ny = (py + dy as usize - 1) * ps;
+                for dx in 0u32..3 {
+                    // Skip center (0,0,0) and the 6 axis-aligned neighbors
+                    let axis_count = (dx != 1) as u32 + (dy != 1) as u32 + (dz != 1) as u32;
+                    if axis_count < 2 {
+                        continue;
+                    }
+                    let nx = px + dx as usize - 1;
+                    solid += (self.density[nx + ny + nz] < 0.0) as u32;
+                }
+            }
+        }
 
         let ao = 1.0 - (solid as f32 / 26.0) * 0.6;
         (normal, ao)

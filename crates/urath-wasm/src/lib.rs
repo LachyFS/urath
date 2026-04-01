@@ -5,6 +5,51 @@ use urath::{
     TerrainConfig, TerrainGenerator,
 };
 
+pub const FACE_POS_X: u8 = 0;
+pub const FACE_NEG_X: u8 = 1;
+pub const FACE_POS_Y: u8 = 2;
+pub const FACE_NEG_Y: u8 = 3;
+pub const FACE_POS_Z: u8 = 4;
+pub const FACE_NEG_Z: u8 = 5;
+
+/// Face direction constants exported to JavaScript.
+#[wasm_bindgen]
+pub fn face_pos_x() -> u8 {
+    FACE_POS_X
+}
+#[wasm_bindgen]
+pub fn face_neg_x() -> u8 {
+    FACE_NEG_X
+}
+#[wasm_bindgen]
+pub fn face_pos_y() -> u8 {
+    FACE_POS_Y
+}
+#[wasm_bindgen]
+pub fn face_neg_y() -> u8 {
+    FACE_NEG_Y
+}
+#[wasm_bindgen]
+pub fn face_pos_z() -> u8 {
+    FACE_POS_Z
+}
+#[wasm_bindgen]
+pub fn face_neg_z() -> u8 {
+    FACE_NEG_Z
+}
+
+fn face_from_u8(val: u8) -> Result<Face, JsError> {
+    match val {
+        0 => Ok(Face::PosX),
+        1 => Ok(Face::NegX),
+        2 => Ok(Face::PosY),
+        3 => Ok(Face::NegY),
+        4 => Ok(Face::PosZ),
+        5 => Ok(Face::NegZ),
+        _ => Err(JsError::new(&format!("invalid face: {val}, must be 0-5"))),
+    }
+}
+
 /// WASM-exposed chunk that holds voxel data.
 #[wasm_bindgen]
 pub struct WasmChunk {
@@ -70,18 +115,10 @@ impl WasmChunk {
 
     /// Extract the border slice for a given face direction.
     /// Returns a Uint16Array of size² elements.
-    pub fn extract_border(&self, face: u8) -> js_sys::Uint16Array {
-        let f = match face {
-            0 => Face::PosX,
-            1 => Face::NegX,
-            2 => Face::PosY,
-            3 => Face::NegY,
-            4 => Face::PosZ,
-            5 => Face::NegZ,
-            _ => return js_sys::Uint16Array::new_with_length(0),
-        };
+    pub fn extract_border(&self, face: u8) -> Result<js_sys::Uint16Array, JsError> {
+        let f = face_from_u8(face)?;
         let border = self.inner.extract_border(f);
-        js_sys::Uint16Array::from(&border[..])
+        Ok(js_sys::Uint16Array::from(&border[..]))
     }
 
     /// True if all blocks are air. O(1).
@@ -114,15 +151,7 @@ impl WasmChunkNeighbors {
     /// E.g., calling `set_neighbor(0, neighborChunk)` extracts the NegX (x=0) border
     /// from `neighborChunk` and uses it as the PosX neighbor data.
     pub fn set_neighbor(&mut self, face: u8, neighbor_chunk: &WasmChunk) -> Result<(), JsError> {
-        let face = match face {
-            0 => Face::PosX,
-            1 => Face::NegX,
-            2 => Face::PosY,
-            3 => Face::NegY,
-            4 => Face::PosZ,
-            5 => Face::NegZ,
-            _ => return Ok(()),
-        };
+        let face = face_from_u8(face)?;
         let border = neighbor_chunk.inner.extract_border(face.opposite());
         self.inner
             .set_face(face, border)
@@ -132,15 +161,7 @@ impl WasmChunkNeighbors {
     /// Set neighbor border data directly from a Uint16Array (size² elements).
     /// Used by workers that don't have the neighbor WasmChunk.
     pub fn set_neighbor_border(&mut self, face: u8, data: &[u16]) -> Result<(), JsError> {
-        let face = match face {
-            0 => Face::PosX,
-            1 => Face::NegX,
-            2 => Face::PosY,
-            3 => Face::NegY,
-            4 => Face::PosZ,
-            5 => Face::NegZ,
-            _ => return Ok(()),
-        };
+        let face = face_from_u8(face)?;
         self.inner
             .set_face(face, data.to_vec())
             .map_err(|e| JsError::new(&e.to_string()))
@@ -179,32 +200,32 @@ impl WasmMeshResult {
 
     /// Opaque positions (Float32Array, 3 floats per vertex).
     pub fn positions(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.positions[..])
+        js_sys::Float32Array::from(self.opaque.positions())
     }
 
     /// Opaque normals (Float32Array, 3 floats per vertex).
     pub fn normals(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.normals[..])
+        js_sys::Float32Array::from(self.opaque.normals())
     }
 
     /// Opaque AO values (Float32Array, 1 float per vertex).
     pub fn ao(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.ao[..])
+        js_sys::Float32Array::from(self.opaque.ao())
     }
 
     /// Opaque block IDs (Uint16Array).
     pub fn block_ids(&self) -> js_sys::Uint16Array {
-        js_sys::Uint16Array::from(&self.opaque.block_ids[..])
+        js_sys::Uint16Array::from(self.opaque.block_ids())
     }
 
     /// Opaque UV coordinates (Float32Array, 2 floats per vertex).
     pub fn uvs(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.uvs[..])
+        js_sys::Float32Array::from(self.opaque.uvs())
     }
 
     /// Opaque indices (Uint32Array).
     pub fn indices(&self) -> js_sys::Uint32Array {
-        js_sys::Uint32Array::from(&self.opaque.indices[..])
+        js_sys::Uint32Array::from(self.opaque.indices())
     }
 
     // --- Transparent mesh accessors ---
@@ -226,32 +247,32 @@ impl WasmMeshResult {
 
     /// Transparent positions (Float32Array, 3 floats per vertex).
     pub fn transparent_positions(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.positions[..])
+        js_sys::Float32Array::from(self.transparent.positions())
     }
 
     /// Transparent normals (Float32Array, 3 floats per vertex).
     pub fn transparent_normals(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.normals[..])
+        js_sys::Float32Array::from(self.transparent.normals())
     }
 
     /// Transparent AO values (Float32Array, 1 float per vertex).
     pub fn transparent_ao(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.ao[..])
+        js_sys::Float32Array::from(self.transparent.ao())
     }
 
     /// Transparent block IDs (Uint16Array).
     pub fn transparent_block_ids(&self) -> js_sys::Uint16Array {
-        js_sys::Uint16Array::from(&self.transparent.block_ids[..])
+        js_sys::Uint16Array::from(self.transparent.block_ids())
     }
 
     /// Transparent UV coordinates (Float32Array, 2 floats per vertex).
     pub fn transparent_uvs(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.uvs[..])
+        js_sys::Float32Array::from(self.transparent.uvs())
     }
 
     /// Transparent indices (Uint32Array).
     pub fn transparent_indices(&self) -> js_sys::Uint32Array {
-        js_sys::Uint32Array::from(&self.transparent.indices[..])
+        js_sys::Uint32Array::from(self.transparent.indices())
     }
 }
 
@@ -313,6 +334,13 @@ impl WasmGreedyMesher {
         chunk: &WasmChunk,
         neighbors: &WasmChunkNeighbors,
     ) -> Result<WasmMeshResult, JsError> {
+        if neighbors.inner.size() != chunk.inner.size() {
+            return Err(JsError::new(&format!(
+                "neighbor size {} does not match chunk size {}",
+                neighbors.inner.size(),
+                chunk.inner.size()
+            )));
+        }
         let mut opaque = MeshOutput::with_capacity(4096);
         let mut transparent = MeshOutput::with_capacity(1024);
         self.inner
@@ -375,6 +403,13 @@ impl WasmSurfaceNetsMesher {
         chunk: &WasmChunk,
         neighbors: &WasmChunkNeighbors,
     ) -> Result<WasmMeshResult, JsError> {
+        if neighbors.inner.size() != chunk.inner.size() {
+            return Err(JsError::new(&format!(
+                "neighbor size {} does not match chunk size {}",
+                neighbors.inner.size(),
+                chunk.inner.size()
+            )));
+        }
         let mut opaque = MeshOutput::with_capacity(4096);
         let mut transparent = MeshOutput::new();
         self.inner

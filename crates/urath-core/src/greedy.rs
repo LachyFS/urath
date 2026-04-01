@@ -92,93 +92,16 @@ impl GreedyMesher {
         }
 
         // Fill borders from neighbors.
-        // Border indexing conventions match extract_border/get_border_block:
-        //   PosX/NegX: [z + y * s]
-        //   PosY/NegY: [x + z * s]
-        //   PosZ/NegZ: [x + y * s]
-
-        if let Some(data) = neighbors.border_slice(Face::NegX) {
-            for y in 0..s {
-                for z in 0..s {
-                    let block = data[z + y * s];
-                    if block != 0 {
-                        let pi = (y + 1) * ps + (z + 1) * ps2;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(data) = neighbors.border_slice(Face::PosX) {
-            for y in 0..s {
-                for z in 0..s {
-                    let block = data[z + y * s];
-                    if block != 0 {
-                        let pi = (s + 1) + (y + 1) * ps + (z + 1) * ps2;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(data) = neighbors.border_slice(Face::NegY) {
-            for z in 0..s {
-                for x in 0..s {
-                    let block = data[x + z * s];
-                    if block != 0 {
-                        let pi = (x + 1) + (z + 1) * ps2;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(data) = neighbors.border_slice(Face::PosY) {
-            for z in 0..s {
-                for x in 0..s {
-                    let block = data[x + z * s];
-                    if block != 0 {
-                        let pi = (x + 1) + (s + 1) * ps + (z + 1) * ps2;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(data) = neighbors.border_slice(Face::NegZ) {
-            for y in 0..s {
-                for x in 0..s {
-                    let block = data[x + y * s];
-                    if block != 0 {
-                        let pi = (x + 1) + (y + 1) * ps;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(data) = neighbors.border_slice(Face::PosZ) {
-            for y in 0..s {
-                for x in 0..s {
-                    let block = data[x + y * s];
-                    if block != 0 {
-                        let pi = (x + 1) + (y + 1) * ps + (s + 1) * ps2;
-                        self.padded_blocks[pi] = block;
-                        if registry.is_opaque(block) {
-                            self.ao_opaque[pi] = 1;
-                        }
-                    }
-                }
+        for &face in &Face::ALL {
+            if let Some(data) = neighbors.border_slice(face) {
+                load_border(
+                    &mut self.padded_blocks,
+                    &mut self.ao_opaque,
+                    face,
+                    data,
+                    s,
+                    registry,
+                );
             }
         }
 
@@ -395,6 +318,42 @@ impl GreedyMesher {
 impl Default for GreedyMesher {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Load a single neighbor border slice into the padded block and AO buffers.
+///
+/// Each face maps its 2D border coordinates `(u, v)` — stored as `data[u + v * s]` —
+/// to a different padded 3D index depending on which face the border belongs to.
+fn load_border(
+    padded_blocks: &mut [u16],
+    ao_opaque: &mut [u8],
+    face: Face,
+    data: &[u16],
+    s: usize,
+    registry: &BlockRegistry,
+) {
+    let ps = s + 2;
+    let ps2 = ps * ps;
+    for v in 0..s {
+        for u in 0..s {
+            let block = data[u + v * s];
+            if block == 0 {
+                continue;
+            }
+            let pi = match face {
+                Face::NegX => (v + 1) * ps + (u + 1) * ps2,
+                Face::PosX => (s + 1) + (v + 1) * ps + (u + 1) * ps2,
+                Face::NegY => (u + 1) + (v + 1) * ps2,
+                Face::PosY => (u + 1) + (s + 1) * ps + (v + 1) * ps2,
+                Face::NegZ => (u + 1) + (v + 1) * ps,
+                Face::PosZ => (u + 1) + (v + 1) * ps + (s + 1) * ps2,
+            };
+            padded_blocks[pi] = block;
+            if registry.is_opaque(block) {
+                ao_opaque[pi] = 1;
+            }
+        }
     }
 }
 

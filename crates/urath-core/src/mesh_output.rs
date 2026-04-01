@@ -5,18 +5,18 @@
 /// without deallocating.
 pub struct MeshOutput {
     /// Vertex positions — 3 floats (x, y, z) per vertex.
-    pub positions: Vec<f32>,
+    pub(crate) positions: Vec<f32>,
     /// Vertex normals — 3 floats (nx, ny, nz) per vertex.
-    pub normals: Vec<f32>,
+    pub(crate) normals: Vec<f32>,
     /// Ambient occlusion — 1 float per vertex, range [0.0, 1.0] where 1.0 = fully lit.
-    pub ao: Vec<f32>,
+    pub(crate) ao: Vec<f32>,
     /// Block ID per vertex — used for texture lookup.
-    pub block_ids: Vec<u16>,
+    pub(crate) block_ids: Vec<u16>,
     /// Texture coordinates — 2 floats (u, v) per vertex.
     /// For greedy-merged quads, UVs tile: a W×H quad gets UVs spanning [0,W]×[0,H].
-    pub uvs: Vec<f32>,
+    pub(crate) uvs: Vec<f32>,
     /// Triangle indices.
-    pub indices: Vec<u32>,
+    pub(crate) indices: Vec<u32>,
     /// Current number of vertices.
     vertex_count: u32,
 }
@@ -78,6 +78,42 @@ impl MeshOutput {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.vertex_count == 0
+    }
+
+    /// Vertex positions as a slice — 3 floats (x, y, z) per vertex.
+    #[inline]
+    pub fn positions(&self) -> &[f32] {
+        &self.positions
+    }
+
+    /// Vertex normals as a slice — 3 floats (nx, ny, nz) per vertex.
+    #[inline]
+    pub fn normals(&self) -> &[f32] {
+        &self.normals
+    }
+
+    /// Ambient occlusion values as a slice — 1 float per vertex.
+    #[inline]
+    pub fn ao(&self) -> &[f32] {
+        &self.ao
+    }
+
+    /// Block IDs as a slice — 1 u16 per vertex.
+    #[inline]
+    pub fn block_ids(&self) -> &[u16] {
+        &self.block_ids
+    }
+
+    /// UV coordinates as a slice — 2 floats (u, v) per vertex.
+    #[inline]
+    pub fn uvs(&self) -> &[f32] {
+        &self.uvs
+    }
+
+    /// Triangle indices as a slice.
+    #[inline]
+    pub fn indices(&self) -> &[u32] {
+        &self.indices
     }
 
     /// Append a quad (4 vertices, 6 indices / 2 triangles).
