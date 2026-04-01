@@ -16,6 +16,16 @@ pub fn vertex_ao(side1: bool, side2: bool, corner: bool) -> u8 {
     3 - (side1 as u8 + side2 as u8 + corner as u8)
 }
 
+/// Convert a signed coordinate to `usize` only if it lies in `[0, size)`.
+#[inline]
+fn coord_as_usize(val: i32, size: i32) -> Option<usize> {
+    if val >= 0 && val < size {
+        Some(val as usize)
+    } else {
+        None
+    }
+}
+
 /// Sample whether a block at signed coordinates is opaque.
 ///
 /// Handles coordinates outside the chunk bounds by reading from `neighbors`.
@@ -34,30 +44,40 @@ pub fn sample_block_opaque(
     let size = chunk.size() as i32;
 
     // Within chunk bounds
-    if x >= 0 && x < size && y >= 0 && y < size && z >= 0 && z < size {
-        return registry.is_opaque(chunk.get(x as usize, y as usize, z as usize));
+    if let (Some(ux), Some(uy), Some(uz)) = (
+        coord_as_usize(x, size),
+        coord_as_usize(y, size),
+        coord_as_usize(z, size),
+    ) {
+        return registry.is_opaque(chunk.get(ux, uy, uz));
     }
 
     // Outside chunk — check neighbors
     // For simplicity, only handle the case where exactly one axis is out of bounds
     // (corner/edge neighbors are treated as air)
-    if x < 0 && y >= 0 && y < size && z >= 0 && z < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::NegX, z as usize, y as usize));
+    if let (Some(uy), Some(uz)) = (coord_as_usize(y, size), coord_as_usize(z, size)) {
+        if x < 0 {
+            return registry.is_opaque(neighbors.get_border_block(Face::NegX, uz, uy));
+        }
+        if x >= size {
+            return registry.is_opaque(neighbors.get_border_block(Face::PosX, uz, uy));
+        }
     }
-    if x >= size && y >= 0 && y < size && z >= 0 && z < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::PosX, z as usize, y as usize));
+    if let (Some(ux), Some(uz)) = (coord_as_usize(x, size), coord_as_usize(z, size)) {
+        if y < 0 {
+            return registry.is_opaque(neighbors.get_border_block(Face::NegY, ux, uz));
+        }
+        if y >= size {
+            return registry.is_opaque(neighbors.get_border_block(Face::PosY, ux, uz));
+        }
     }
-    if y < 0 && x >= 0 && x < size && z >= 0 && z < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::NegY, x as usize, z as usize));
-    }
-    if y >= size && x >= 0 && x < size && z >= 0 && z < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::PosY, x as usize, z as usize));
-    }
-    if z < 0 && x >= 0 && x < size && y >= 0 && y < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::NegZ, x as usize, y as usize));
-    }
-    if z >= size && x >= 0 && x < size && y >= 0 && y < size {
-        return registry.is_opaque(neighbors.get_border_block(Face::PosZ, x as usize, y as usize));
+    if let (Some(ux), Some(uy)) = (coord_as_usize(x, size), coord_as_usize(y, size)) {
+        if z < 0 {
+            return registry.is_opaque(neighbors.get_border_block(Face::NegZ, ux, uy));
+        }
+        if z >= size {
+            return registry.is_opaque(neighbors.get_border_block(Face::PosZ, ux, uy));
+        }
     }
 
     // Edge/corner neighbor — treat as air
