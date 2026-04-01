@@ -53,10 +53,7 @@ impl WasmChunk {
 
     /// Fill a column from y=0 to y=height-1 with a block ID.
     pub fn fill_column(&mut self, x: usize, z: usize, height: usize, block_id: u16) {
-        let max = height.min(self.inner.size());
-        for y in 0..max {
-            self.inner.set(x, y, z, block_id);
-        }
+        self.inner.fill_column(x, z, height, block_id);
     }
 
     /// Copy all block data into a new Uint16Array.
@@ -195,10 +192,9 @@ impl WasmMeshResult {
         js_sys::Float32Array::from(&self.opaque.ao[..])
     }
 
-    /// Opaque block IDs (Float32Array, cast from u16).
-    pub fn block_ids(&self) -> js_sys::Float32Array {
-        let f32_vec: Vec<f32> = self.opaque.block_ids.iter().map(|&id| id as f32).collect();
-        js_sys::Float32Array::from(&f32_vec[..])
+    /// Opaque block IDs (Uint16Array).
+    pub fn block_ids(&self) -> js_sys::Uint16Array {
+        js_sys::Uint16Array::from(&self.opaque.block_ids[..])
     }
 
     /// Opaque UV coordinates (Float32Array, 2 floats per vertex).
@@ -243,15 +239,9 @@ impl WasmMeshResult {
         js_sys::Float32Array::from(&self.transparent.ao[..])
     }
 
-    /// Transparent block IDs (Float32Array, cast from u16).
-    pub fn transparent_block_ids(&self) -> js_sys::Float32Array {
-        let f32_vec: Vec<f32> = self
-            .transparent
-            .block_ids
-            .iter()
-            .map(|&id| id as f32)
-            .collect();
-        js_sys::Float32Array::from(&f32_vec[..])
+    /// Transparent block IDs (Uint16Array).
+    pub fn transparent_block_ids(&self) -> js_sys::Uint16Array {
+        js_sys::Uint16Array::from(&self.transparent.block_ids[..])
     }
 
     /// Transparent UV coordinates (Float32Array, 2 floats per vertex).
