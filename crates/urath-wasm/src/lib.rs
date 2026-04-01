@@ -182,33 +182,38 @@ impl WasmMeshResult {
 
     /// Opaque positions (Float32Array, 3 floats per vertex).
     pub fn positions(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.positions[..])
+        js_sys::Float32Array::from(self.opaque.positions())
     }
 
     /// Opaque normals (Float32Array, 3 floats per vertex).
     pub fn normals(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.normals[..])
+        js_sys::Float32Array::from(self.opaque.normals())
     }
 
     /// Opaque AO values (Float32Array, 1 float per vertex).
     pub fn ao(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.ao[..])
+        js_sys::Float32Array::from(self.opaque.ao())
     }
 
     /// Opaque block IDs (Float32Array, cast from u16).
     pub fn block_ids(&self) -> js_sys::Float32Array {
-        let f32_vec: Vec<f32> = self.opaque.block_ids.iter().map(|&id| id as f32).collect();
+        let f32_vec: Vec<f32> = self
+            .opaque
+            .block_ids()
+            .iter()
+            .map(|&id| id as f32)
+            .collect();
         js_sys::Float32Array::from(&f32_vec[..])
     }
 
     /// Opaque UV coordinates (Float32Array, 2 floats per vertex).
     pub fn uvs(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.opaque.uvs[..])
+        js_sys::Float32Array::from(self.opaque.uvs())
     }
 
     /// Opaque indices (Uint32Array).
     pub fn indices(&self) -> js_sys::Uint32Array {
-        js_sys::Uint32Array::from(&self.opaque.indices[..])
+        js_sys::Uint32Array::from(self.opaque.indices())
     }
 
     // --- Transparent mesh accessors ---
@@ -230,24 +235,24 @@ impl WasmMeshResult {
 
     /// Transparent positions (Float32Array, 3 floats per vertex).
     pub fn transparent_positions(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.positions[..])
+        js_sys::Float32Array::from(self.transparent.positions())
     }
 
     /// Transparent normals (Float32Array, 3 floats per vertex).
     pub fn transparent_normals(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.normals[..])
+        js_sys::Float32Array::from(self.transparent.normals())
     }
 
     /// Transparent AO values (Float32Array, 1 float per vertex).
     pub fn transparent_ao(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.ao[..])
+        js_sys::Float32Array::from(self.transparent.ao())
     }
 
     /// Transparent block IDs (Float32Array, cast from u16).
     pub fn transparent_block_ids(&self) -> js_sys::Float32Array {
         let f32_vec: Vec<f32> = self
             .transparent
-            .block_ids
+            .block_ids()
             .iter()
             .map(|&id| id as f32)
             .collect();
@@ -256,12 +261,12 @@ impl WasmMeshResult {
 
     /// Transparent UV coordinates (Float32Array, 2 floats per vertex).
     pub fn transparent_uvs(&self) -> js_sys::Float32Array {
-        js_sys::Float32Array::from(&self.transparent.uvs[..])
+        js_sys::Float32Array::from(self.transparent.uvs())
     }
 
     /// Transparent indices (Uint32Array).
     pub fn transparent_indices(&self) -> js_sys::Uint32Array {
-        js_sys::Uint32Array::from(&self.transparent.indices[..])
+        js_sys::Uint32Array::from(self.transparent.indices())
     }
 }
 
