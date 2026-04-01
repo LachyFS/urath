@@ -303,6 +303,12 @@ pub struct ChunkNeighbors {
 }
 
 impl ChunkNeighbors {
+    /// The chunk size this neighbor set was created for.
+    #[inline]
+    pub fn size(&self) -> usize {
+        self.size
+    }
+
     /// Create neighbors with all faces treated as air.
     pub fn empty(size: usize) -> Self {
         Self {
