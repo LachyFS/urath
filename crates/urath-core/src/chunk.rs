@@ -196,6 +196,30 @@ impl Chunk {
         count
     }
 
+    /// Fill a column at (x, z) from y=0 to y=height-1 with a block ID.
+    ///
+    /// More efficient than calling `set()` in a loop because it computes
+    /// the base index once and increments by stride, and batches the
+    /// `non_air_count` update.
+    pub fn fill_column(&mut self, x: usize, z: usize, height: usize, block_id: u16) {
+        if x >= self.size || z >= self.size {
+            return;
+        }
+        let max = height.min(self.size);
+        let base = x + z * self.size * self.size;
+        let stride = self.size; // y stride in the x + y*size + z*size*size layout
+        for y in 0..max {
+            let idx = base + y * stride;
+            let old = self.blocks[idx];
+            if old == 0 && block_id != 0 {
+                self.non_air_count += 1;
+            } else if old != 0 && block_id == 0 {
+                self.non_air_count -= 1;
+            }
+            self.blocks[idx] = block_id;
+        }
+    }
+
     /// Check if (x, y, z) is air (block ID 0).
     #[inline]
     pub fn is_air(&self, x: usize, y: usize, z: usize) -> bool {
@@ -206,6 +230,12 @@ impl Chunk {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.non_air_count == 0
+    }
+
+    /// Number of non-air blocks in the chunk. O(1).
+    #[inline]
+    pub fn non_air_blocks(&self) -> u32 {
+        self.non_air_count
     }
 
     /// True if every block is non-air. O(1).
@@ -464,5 +494,29 @@ mod tests {
         let mut chunk = Chunk::new_default();
         let data = vec![0u16; 10]; // wrong size
         assert!(chunk.replace_blocks(&data).is_err());
+    }
+
+    #[test]
+    fn fill_column_basic() {
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.fill_column(1, 2, 3, 5);
+        assert_eq!(chunk.get(1, 0, 2), 5);
+        assert_eq!(chunk.get(1, 1, 2), 5);
+        assert_eq!(chunk.get(1, 2, 2), 5);
+        assert_eq!(chunk.get(1, 3, 2), 0); // height=3, so y=3 is air
+        assert!(!chunk.is_empty());
+    }
+
+    #[test]
+    fn fill_column_overwrite() {
+        let mut chunk = Chunk::new(4).unwrap();
+        chunk.fill_column(0, 0, 4, 1);
+        assert_eq!(chunk.non_air_blocks(), 4);
+        chunk.fill_column(0, 0, 2, 0); // clear first 2
+        assert_eq!(chunk.non_air_blocks(), 2);
+        assert_eq!(chunk.get(0, 0, 0), 0);
+        assert_eq!(chunk.get(0, 1, 0), 0);
+        assert_eq!(chunk.get(0, 2, 0), 1);
+        assert_eq!(chunk.get(0, 3, 0), 1);
     }
 }
