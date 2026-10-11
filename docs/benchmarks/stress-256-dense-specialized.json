@@ -1,0 +1,60 @@
+{
+  "timestamp": "2026-10-10T23:17:34.614Z",
+  "buildSha256": "4ccdd920c009e507be8f39c762598fa011c1f562c0e222192df65ee61b3acee5",
+  "results": [
+    {
+      "fixture": "volume-dense",
+      "size": 256,
+      "pixels": 1024,
+      "samplesPerRay": 1024,
+      "opacity": 0.008,
+      "constructionMs": 51.10000014305115,
+      "views": [
+        {
+          "view": "overview",
+          "gpuMs": {
+            "count": 64,
+            "p50": 28.47102,
+            "p95": 39.01441,
+            "max": 39.44466
+          }
+        },
+        {
+          "view": "close",
+          "gpuMs": {
+            "count": 64,
+            "p50": 55.59719,
+            "p95": 59.57567,
+            "max": 59.7209
+          }
+        }
+      ],
+      "scatteredEdit": {
+        "updateCpuMs": 0.20000004768371582,
+        "renderGpuMs": 59.19267,
+        "uploadedBytes": 512,
+        "regionUploads": 2
+      },
+      "resources": {
+        "inputBytes": 67108864,
+        "gpuBytes": 67143680,
+        "managedBytes": 134558281,
+        "budgetBytes": 1610612736,
+        "textureDimensions": [
+          256,
+          256,
+          256
+        ],
+        "maxSteps": 1024,
+        "accelerationBytes": 332361,
+        "uploadedBytes": 67109376,
+        "fullUploads": 1,
+        "regionUploads": 2
+      },
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false,
+      "glError": 0,
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36"
+    }
+  ]
+}

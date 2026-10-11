@@ -2,10 +2,13 @@
 
 ## Project: urath
 
-Rust/WASM voxel meshing library for Three.js. Monorepo with Rust workspace + TypeScript npm package.
+Voxel surface and scalar-volume library for Three.js. Monorepo with Rust workspace + TypeScript npm package.
 
 ### Build Commands
 
+- `npm ci && npm run build` — build WASM, package, and performance viewer from the repository root
+- `npm test && npm run test:browser && npm run test:package` — data tests, production-browser tests, and independent packed-consumer test (install Playwright Chromium first)
+- `npm run benchmark` — export browser workload measurements (software renderer by default)
 - `cd crates/urath-core && cargo test` — run Rust unit tests
 - `cd crates/urath-core && cargo bench` — run Criterion benchmarks
 - `cd crates/urath-wasm && wasm-pack build --target web --out-dir ../../packages/urath/wasm` — build WASM
@@ -17,6 +20,8 @@ Rust/WASM voxel meshing library for Three.js. Monorepo with Rust workspace + Typ
 - `crates/urath-core/` — Pure Rust. Meshing algorithms, chunk data structures, output buffers. No WASM deps here.
 - `crates/urath-wasm/` — Thin wasm-bindgen wrapper over core. Handles JS ↔ WASM buffer marshalling.
 - `packages/urath/` — TypeScript npm package. Wraps WASM, adds Three.js integration, worker pool, materials.
+- `examples/demo/` — Performance lab. Uses the public package API for both rendering paths.
+- `scripts/test-package.mjs` — Tests the actual archive in a separate TypeScript/Vite project under a URL subpath.
 
 ### Conventions
 

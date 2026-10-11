@@ -12,6 +12,88 @@ pub const FACE_NEG_Y: u8 = 3;
 pub const FACE_POS_Z: u8 = 4;
 pub const FACE_NEG_Z: u8 = 5;
 
+/// Reusable opaque-material meshing session used by the browser worker.
+///
+/// Unlike the legacy result-returning API, output capacity is retained between
+/// calls. Getters make one owned JS copy suitable for transferable buffers.
+/// All nonzero IDs are opaque; scalar transparency belongs to volume rendering.
+#[wasm_bindgen]
+pub struct WasmMeshSession {
+    chunk: urath::Chunk,
+    neighbors: ChunkNeighbors,
+    mesher: GreedyMesher,
+    registry: BlockRegistry,
+    output: WasmMeshResult,
+}
+
+#[wasm_bindgen]
+impl WasmMeshSession {
+    #[wasm_bindgen(constructor)]
+    pub fn new(size: usize) -> Result<WasmMeshSession, JsError> {
+        if !(4..=32).contains(&size) {
+            return Err(JsError::new("session chunk size must be between 4 and 32"));
+        }
+        let mut registry = BlockRegistry::new();
+        registry.set_opaque(5);
+        registry.set_opaque(9);
+        // Each internal voxel adjacency can expose at most one opaque face.
+        let max_quads = 3 * size * size * size + 3 * size * size;
+        Ok(Self {
+            chunk: urath::Chunk::new(size).map_err(|e| JsError::new(&e.to_string()))?,
+            neighbors: ChunkNeighbors::empty(size),
+            mesher: GreedyMesher::with_chunk_size(size),
+            registry,
+            output: WasmMeshResult {
+                opaque: MeshOutput::with_capacity(max_quads),
+                transparent: MeshOutput::new(),
+            },
+        })
+    }
+
+    /// Borders are concatenated in +X,-X,+Y,-Y,+Z,-Z order (size² each).
+    pub fn mesh(&mut self, blocks: &[u16], borders: &[u16]) -> Result<(), JsError> {
+        let area = self.chunk.size() * self.chunk.size();
+        if borders.len() != area * 6 {
+            return Err(JsError::new("expected six complete neighbor borders"));
+        }
+        self.chunk
+            .replace_blocks(blocks)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        for (index, face) in Face::ALL.iter().enumerate() {
+            self.neighbors
+                .copy_face(*face, &borders[index * area..(index + 1) * area])
+                .map_err(|e| JsError::new(&e.to_string()))?;
+        }
+        self.output.opaque.clear();
+        self.output.transparent.clear();
+        self.mesher
+            .mesh(
+                &self.chunk,
+                &self.neighbors,
+                &self.registry,
+                &mut self.output.opaque,
+                &mut self.output.transparent,
+            )
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    pub fn positions(&self) -> js_sys::Float32Array {
+        self.output.positions()
+    }
+    pub fn normals(&self) -> js_sys::Float32Array {
+        self.output.normals()
+    }
+    pub fn ao(&self) -> js_sys::Float32Array {
+        self.output.ao()
+    }
+    pub fn block_ids(&self) -> js_sys::Uint16Array {
+        self.output.block_ids()
+    }
+    pub fn indices(&self) -> js_sys::Uint32Array {
+        self.output.indices()
+    }
+}
+
 /// Face direction constants exported to JavaScript.
 #[wasm_bindgen]
 pub fn face_pos_x() -> u8 {

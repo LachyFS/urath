@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-10-11T00:04:06.086Z",
+  "buildSha256": "1bf8b81985ebac4c4488f41848f09b8131622dd3660eded1ff2f2d83535b86ff",
+  "results": [
+    {
+      "fixture": "volume-dense",
+      "shaderVariant": "production",
+      "inputType": "uint16",
+      "forceFloat32": true,
+      "transferCache": false,
+      "size": 512,
+      "pixels": 1024,
+      "samplesPerRay": 1024,
+      "opacity": 0.008,
+      "constructionMs": 403.59999990463257,
+      "firstDraw": {
+        "gpuMs": 232.24007,
+        "wallMs": 278.5
+      },
+      "views": [
+        {
+          "view": "overview",
+          "gpuMs": {
+            "count": 64,
+            "p50": 216.24576,
+            "p95": 257.39731,
+            "max": 258.76514
+          }
+        },
+        {
+          "view": "close",
+          "gpuMs": {
+            "count": 64,
+            "p50": 197.60438,
+            "p95": 212.9319,
+            "max": 213.82754
+          }
+        }
+      ],
+      "scatteredEdit": {
+        "updateCpuMs": 0.2999999523162842,
+        "renderGpuMs": 213.62908,
+        "uploadedBytes": 512,
+        "regionUploads": 2
+      },
+      "resources": {
+        "transferCacheBytes": 0,
+        "transferCacheBuilds": 0,
+        "transferCacheUpdatedVoxels": 0,
+        "storage": "float32",
+        "inputBytes": 536870912,
+        "gpuBytes": 537135104,
+        "managedBytes": 1076408905,
+        "budgetBytes": 1610612736,
+        "textureDimensions": [
+          512,
+          512,
+          512
+        ],
+        "maxSteps": 1024,
+        "accelerationBytes": 2658889,
+        "uploadedBytes": 536871424,
+        "fullUploads": 1,
+        "regionUploads": 2
+      },
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false,
+      "glError": 0,
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36"
+    }
+  ]
+}

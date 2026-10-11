@@ -362,6 +362,22 @@ impl ChunkNeighbors {
         Ok(())
     }
 
+    /// Copy a border into reusable storage, allocating only on the first call.
+    pub fn copy_face(&mut self, face: Face, data: &[u16]) -> Result<(), MeshError> {
+        let expected = self.size * self.size;
+        if data.len() != expected {
+            return Err(MeshError::SizeMismatch {
+                expected,
+                actual: data.len(),
+            });
+        }
+        match &mut self.faces[face as usize] {
+            Some(buffer) => buffer.copy_from_slice(data),
+            slot @ None => *slot = Some(data.to_vec()),
+        }
+        Ok(())
+    }
+
     /// Get a block from the neighbor's border.
     /// `u` and `v` are in the face's tangent coordinate system.
     /// Returns 0 (air) if no neighbor data is set for this face.
@@ -404,6 +420,21 @@ impl ChunkNeighbors {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copy_face_reuses_storage_and_rejects_invalid_lengths() {
+        let mut neighbors = ChunkNeighbors::empty(4);
+        neighbors.copy_face(Face::PosX, &[1; 16]).unwrap();
+        let pointer = neighbors.border_slice(Face::PosX).unwrap().as_ptr();
+        neighbors.copy_face(Face::PosX, &[2; 16]).unwrap();
+        assert_eq!(
+            pointer,
+            neighbors.border_slice(Face::PosX).unwrap().as_ptr()
+        );
+        assert_eq!(neighbors.border_slice(Face::PosX).unwrap(), &[2; 16]);
+        assert!(neighbors.copy_face(Face::PosX, &[3; 15]).is_err());
+        assert_eq!(neighbors.border_slice(Face::PosX).unwrap(), &[2; 16]);
+    }
 
     #[test]
     fn chunk_new_default() {

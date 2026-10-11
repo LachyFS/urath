@@ -1,2017 +1,293 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>urath</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
-
-  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-
-  :root {
-    --bg: #060608;
-    --surface: rgba(255, 255, 255, 0.03);
-    --border: rgba(255, 255, 255, 0.06);
-    --text-primary: rgba(255, 255, 255, 0.87);
-    --text-secondary: rgba(255, 255, 255, 0.4);
-    --text-dim: rgba(255, 255, 255, 0.18);
-    --accent: #7fcc81;
-    --accent-dim: rgba(127, 204, 129, 0.15);
-    --mono: 'JetBrains Mono', monospace;
-    --sans: 'DM Sans', sans-serif;
-  }
-
-  html, body {
-    height: 100%;
-    overflow: hidden;
-    background: var(--bg);
-    color: var(--text-primary);
-    font-family: var(--mono);
-  }
-
-  canvas { display: block; }
-
-  #scene-container {
-    position: fixed;
-    inset: 0;
-    z-index: 0;
-  }
-
-  /* ── Overlay UI ────────────────────────────────── */
-
-  .overlay {
-    position: fixed;
-    z-index: 10;
-    pointer-events: none;
-  }
-
-  .overlay * {
-    pointer-events: auto;
-  }
-
-  /* Top-left: title block */
-  .header {
-    top: 28px;
-    left: 32px;
-  }
-
-  .header h1 {
-    font-family: var(--mono);
-    font-weight: 700;
-    font-size: 13px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--text-primary);
-    line-height: 1;
-    margin-bottom: 8px;
-  }
-
-  .header h1 span {
-    color: var(--accent);
-  }
-
-  .header .tagline {
-    font-family: var(--sans);
-    font-weight: 300;
-    font-style: italic;
-    font-size: 12px;
-    color: var(--text-secondary);
-    line-height: 1.5;
-    max-width: 280px;
-  }
-
-  /* Bottom-left: stats panel */
-  .stats-panel {
-    bottom: 28px;
-    left: 32px;
-  }
-
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 2px;
-  }
-
-  .stat-cell {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    padding: 10px 14px;
-    min-width: 120px;
-  }
-
-  .stat-cell:first-child { border-radius: 6px 0 0 0; }
-  .stat-cell:nth-child(3) { border-radius: 0 6px 0 0; }
-  .stat-cell:nth-child(4) { border-radius: 0 0 0 6px; }
-  .stat-cell:last-child { border-radius: 0 0 6px 0; }
-
-  .stat-label {
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 4px;
-  }
-
-  .stat-value {
-    font-size: 16px;
-    font-weight: 300;
-    color: var(--text-primary);
-    font-variant-numeric: tabular-nums;
-  }
-
-  .stat-value .unit {
-    font-size: 10px;
-    color: var(--text-secondary);
-    margin-left: 2px;
-  }
-
-  /* Bottom-right: tech badge */
-  .tech-badge {
-    bottom: 28px;
-    right: 32px;
-    text-align: right;
-  }
-
-  .tech-badge .engine {
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    margin-bottom: 6px;
-  }
-
-  .tech-stack {
-    display: flex;
-    gap: 6px;
-    justify-content: flex-end;
-  }
-
-  .tech-tag {
-    font-size: 10px;
-    font-weight: 400;
-    padding: 3px 8px;
-    border-radius: 3px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-  }
-
-  .tech-tag.highlight {
-    border-color: var(--accent-dim);
-    color: var(--accent);
-    background: rgba(127, 204, 129, 0.04);
-  }
-
-  /* ── Loading state ─────────────────────────────── */
-
-  .loading-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 100;
-    background: var(--bg);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 16px;
-    transition: opacity 0.6s ease, visibility 0.6s ease;
-  }
-
-  .loading-overlay.hidden {
-    opacity: 0;
-    visibility: hidden;
-  }
-
-  .loading-text {
-    font-size: 11px;
-    font-weight: 400;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--text-secondary);
-  }
-
-  .loading-bar {
-    width: 120px;
-    height: 1px;
-    background: var(--border);
-    position: relative;
-    overflow: hidden;
-  }
-
-  .loading-bar::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: var(--accent);
-    animation: load-sweep 1.2s ease-in-out infinite;
-    transform-origin: left;
-  }
-
-  @keyframes load-sweep {
-    0%   { transform: scaleX(0); translate: 0; }
-    50%  { transform: scaleX(0.6); translate: 0; }
-    100% { transform: scaleX(0); translate: 120px; }
-  }
-
-  /* ── Fade-in for UI ────────────────────────────── */
-
-  .overlay {
-    opacity: 0;
-    transform: translateY(6px);
-    transition: opacity 0.8s ease 0.3s, transform 0.8s ease 0.3s;
-  }
-
-  body.ready .overlay {
-    opacity: 1;
-    transform: translateY(0);
-  }
-
-  body.ready .stats-panel {
-    transition-delay: 0.5s;
-  }
-
-  body.ready .tech-badge {
-    transition-delay: 0.7s;
-  }
-
-  /* ── Block toolbar ──────────────────────────────── */
-
-  .block-toolbar {
-    bottom: 28px;
-    left: 50%;
-    transform: translateX(-50%);
-    display: flex;
-    gap: 2px;
-  }
-
-  body.ready .block-toolbar {
-    transition-delay: 0.6s;
-  }
-
-  .block-slot {
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    cursor: pointer;
-    position: relative;
-    transition: border-color 0.15s ease;
-  }
-
-  .block-slot.active {
-    border-color: var(--accent);
-    box-shadow: 0 0 6px rgba(127, 204, 129, 0.25);
-  }
-
-  .block-slot .swatch {
-    position: absolute;
-    inset: 4px;
-    border-radius: 2px;
-  }
-
-  .block-slot .key-hint {
-    position: absolute;
-    bottom: -14px;
-    left: 50%;
-    transform: translateX(-50%);
-    font-size: 8px;
-    color: var(--text-dim);
-    font-family: var(--mono);
-  }
-
-  /* ── Brush toolbar ──────────────────────────────── */
-
-  .brush-toolbar {
-    top: 28px;
-    right: 32px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    align-items: flex-end;
-  }
-
-  body.ready .brush-toolbar {
-    transition-delay: 0.6s;
-  }
-
-  .brush-row {
-    display: flex;
-    gap: 3px;
-  }
-
-  .brush-btn {
-    font-family: var(--mono);
-    font-size: 9px;
-    font-weight: 500;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 5px 10px;
-    border-radius: 4px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease;
-  }
-
-  .brush-btn.active {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: rgba(127, 204, 129, 0.04);
-  }
-
-  .radius-ctrl {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-family: var(--mono);
-    font-size: 9px;
-    color: var(--text-secondary);
-  }
-
-  /* ── Crosshair ───────────────────────────────────── */
-
-  .crosshair {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    z-index: 20;
-    pointer-events: none;
-    opacity: 0.5;
-  }
-
-  .crosshair::before, .crosshair::after {
-    content: '';
-    position: absolute;
-    background: #fff;
-  }
-
-  .crosshair::before {
-    width: 12px; height: 1px;
-    top: 0; left: -6px;
-  }
-
-  .crosshair::after {
-    width: 1px; height: 12px;
-    top: -6px; left: 0;
-  }
-
-  .radius-ctrl button {
-    width: 20px;
-    height: 20px;
-    border-radius: 3px;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-secondary);
-    font-family: var(--mono);
-    font-size: 12px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }
-</style>
-
-</head>
-<body>
-
-<div class="loading-overlay" id="loading">
-  <div class="loading-text">Initializing WASM</div>
-  <div class="loading-bar"></div>
-</div>
-
-<div id="scene-container"></div>
-<div class="crosshair"></div>
-
-<div class="overlay header">
-  <h1>urath</h1>
-  <p class="tagline">Greedy meshing with per-vertex ambient occlusion — powered by Rust/WASM</p>
-  <p class="tagline" style="margin-top: 10px; color: var(--text-dim); font-size: 10px; font-family: var(--mono); font-style: normal;">Click to play · WASD move · Space/Shift up/down · LMB break · RMB place · 1-9 block · B brush · [ ] radius · F wireframe · M smooth · T blend · ESC menu</p>
-</div>
-
-<div class="overlay stats-panel">
-  <div class="stats-grid">
-    <div class="stat-cell">
-      <div class="stat-label">Columns</div>
-      <div class="stat-value" id="stat-chunks">—</div>
-    </div>
-    <div class="stat-cell">
-      <div class="stat-label">Draw Verts</div>
-      <div class="stat-value" id="stat-verts">—</div>
-    </div>
-    <div class="stat-cell">
-      <div class="stat-label">Draw Tris</div>
-      <div class="stat-value" id="stat-tris">—</div>
-    </div>
-    <div class="stat-cell">
-      <div class="stat-label">FPS</div>
-      <div class="stat-value" id="stat-fps">—</div>
-    </div>
-    <div class="stat-cell">
-      <div class="stat-label">Pending</div>
-      <div class="stat-value" id="stat-time">—</div>
-    </div>
-    <div class="stat-cell">
-      <div class="stat-label">Wireframe <span style="font-size:7px;color:var(--text-dim)">F</span></div>
-      <div class="stat-value" id="stat-wireframe" style="cursor:pointer">OFF</div>
-    </div>
-  </div>
-</div>
-
-<div class="overlay tech-badge">
-  <div class="engine">Engine</div>
-  <div class="tech-stack">
-    <span class="tech-tag highlight">Rust / WASM</span>
-    <span class="tech-tag">Three.js</span>
-    <span class="tech-tag">Greedy Mesher</span>
-  </div>
-</div>
-
-<div class="overlay brush-toolbar">
-  <div class="brush-row">
-    <button class="brush-btn active" data-brush="single">Single <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
-    <button class="brush-btn" data-brush="sphere">Sphere <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
-    <button class="brush-btn" data-brush="line">Disc <span class="key-hint" style="position:static;margin-left:4px">B</span></button>
-  </div>
-  <div class="radius-ctrl" id="radius-ctrl" style="display:none">
-    <span class="key-hint" style="position:static">[</span>
-    <button id="radius-dec">-</button>
-    <span id="radius-val">2</span>
-    <button id="radius-inc">+</button>
-    <span class="key-hint" style="position:static">]</span>
-  </div>
-</div>
-
-<div class="overlay block-toolbar" id="block-toolbar">
-  <div class="block-slot active" data-block="1"><div class="swatch" style="background:#575458"></div><span class="key-hint">1</span></div>
-  <div class="block-slot" data-block="2"><div class="swatch" style="background:#735239"></div><span class="key-hint">2</span></div>
-  <div class="block-slot" data-block="3"><div class="swatch" style="background:#4d8c38"></div><span class="key-hint">3</span></div>
-  <div class="block-slot" data-block="4"><div class="swatch" style="background:#c2b380"></div><span class="key-hint">4</span></div>
-  <div class="block-slot" data-block="5"><div class="swatch" style="background:#2e598c"></div><span class="key-hint">5</span></div>
-  <div class="block-slot" data-block="6"><div class="swatch" style="background:#d9dee6"></div><span class="key-hint">6</span></div>
-  <div class="block-slot" data-block="7"><div class="swatch" style="background:#6b6661"></div><span class="key-hint">7</span></div>
-  <div class="block-slot" data-block="8"><div class="swatch" style="background:#5c3d24"></div><span class="key-hint">8</span></div>
-  <div class="block-slot" data-block="9"><div class="swatch" style="background:#337a29"></div><span class="key-hint">9</span></div>
-</div>
-
-<script type="module">
-import * as THREE from 'three';
-import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
-// WASM is loaded by workers — main thread only needs Three.js
-
-// ── Performance test mode ──────────────────────────
-const PERF_MODE = new URLSearchParams(window.location.search).has('perf');
-
-// ── Constants ──────────────────────────────────────
-const CHUNK_SIZE = 32;
-const WORLD_HEIGHT_CHUNKS = 8;   // vertical chunks (8 × 32 = 256 blocks tall)
-const RENDER_DISTANCE = 12;      // chunks from camera center (XZ)
-const UNLOAD_DISTANCE = 14;      // chunks before disposal
-const CHUNKS_PER_FRAME = PERF_MODE ? 999 : 3; // unlimited in perf mode
-
-// ── Block IDs ─────────────────────────────────────
-const BLOCK_AIR    = 0;
-const BLOCK_STONE  = 1;
-const BLOCK_DIRT   = 2;
-const BLOCK_GRASS  = 3;
-const BLOCK_SAND   = 4;
-const BLOCK_WATER  = 5;
-const BLOCK_SNOW   = 6;
-const BLOCK_GRAVEL = 7;
-const BLOCK_LOG    = 8;
-const BLOCK_LEAVES = 9;
-
-// ── Texture loading ────────────────────────────────
-// Texture layers — order must match getTextureLayer() in the shader.
-const TEXTURE_FILES = [
-  'stone.png',       // 0
-  'dirt.png',        // 1
-  'grass_top.png',   // 2
-  'grass_side.png',  // 3
-  'sand.png',        // 4
-  'water.png',       // 5
-  'snow.png',        // 6
-  'gravel.png',      // 7
-  'wood_top.png',    // 8
-  'wood_side.png',   // 9
-  'leaves.png',      // 10
-  'cobblestone.png', // 11
-  'brick.png',       // 12
-];
-
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
-}
-
-async function loadTextureArray() {
-  const size = 16;
-  const count = TEXTURE_FILES.length;
-  const data = new Uint8Array(size * size * 4 * count);
-
-  // Load all images in parallel, then extract pixels sequentially
-  const images = await Promise.all(
-    TEXTURE_FILES.map(file => loadImage(`textures/${file}`))
-  );
-
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
-
-  for (let i = 0; i < images.length; i++) {
-    ctx.save();
-    ctx.clearRect(0, 0, size, size);
-    // Flip vertically so V=0 is the image bottom (OpenGL convention)
-    ctx.translate(0, size);
-    ctx.scale(1, -1);
-    ctx.drawImage(images[i], 0, 0, size, size);
-    ctx.restore();
-    const imageData = ctx.getImageData(0, 0, size, size);
-    data.set(imageData.data, i * size * size * 4);
-  }
-
-  const texture = new THREE.DataArrayTexture(data, size, size, count);
-  texture.magFilter = THREE.NearestFilter;
-  texture.minFilter = THREE.NearestFilter;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.needsUpdate = true;
-  return texture;
-}
-
-// ── Shader material ────────────────────────────────
-function createTerrainMaterial(textureArray) {
-  return new THREE.ShaderMaterial({
-    glslVersion: THREE.GLSL3,
-    vertexShader: /* glsl */ `
-      in float ao;
-      in float blockId;
-      in vec2 texUv;
-
-      uniform mat4 uShadowMatrix;
-      uniform float uShadowNormalBias;
-
-      out float vAo;
-      out float vBlockId;
-      out vec3 vNormal;
-      out vec3 vWorldPos;
-      out vec2 vUv;
-      out vec4 vShadowCoord;
-
-      void main() {
-        vAo = ao;
-        vBlockId = blockId;
-        // World-space normal (model matrix is translation-only, so mat3 is identity)
-        vNormal = normalize(mat3(modelMatrix) * normal);
-        vUv = texUv;
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorldPos = wp.xyz;
-
-        // Shadow coordinate with normal bias to reduce acne
-        vec4 shadowPos = wp + vec4(vNormal * uShadowNormalBias, 0.0);
-        vShadowCoord = uShadowMatrix * shadowPos;
-
-        gl_Position = projectionMatrix * viewMatrix * wp;
-      }
-    `,
-    fragmentShader: /* glsl */ `
-      precision highp float;
-      precision highp sampler2DArray;
-
-      uniform sampler2DArray uTextureArray;
-      uniform vec3 uCameraTarget;
-      uniform bool uWireframe;
-      uniform bool uSmoothMode;
-      uniform bool uBlendTextures;
-      uniform bool uAlphaTest;
-
-      uniform sampler2D uShadowMap;
-      uniform vec2 uShadowMapSize;
-      uniform float uShadowBias;
-
-      in float vAo;
-      in float vBlockId;
-      in vec3 vNormal;
-      in vec3 vWorldPos;
-      in vec2 vUv;
-      in vec4 vShadowCoord;
-
-      out vec4 fragColor;
-
-      float getShadow(vec4 shadowCoord) {
-        vec3 sc = shadowCoord.xyz / shadowCoord.w;
-        // Outside shadow frustum — fully lit
-        if (sc.x < 0.0 || sc.x > 1.0 || sc.y < 0.0 || sc.y > 1.0 || sc.z > 1.0 || sc.z < 0.0) return 1.0;
-        float compareDepth = sc.z - uShadowBias;
-        // 3x3 PCF
-        vec2 texelSize = 1.0 / uShadowMapSize;
-        float shadow = 0.0;
-        for (int x = -1; x <= 1; x++) {
-          for (int y = -1; y <= 1; y++) {
-            float depth = texture(uShadowMap, sc.xy + vec2(float(x), float(y)) * texelSize).r;
-            shadow += step(compareDepth, depth);
-          }
-        }
-        return shadow / 9.0;
-      }
-
-      // Map (blockId, faceType) to texture array layer.
-      // faceType: 0=top, 1=side, 2=bottom
-      int getTextureLayer(int bid, int faceType) {
-        if (bid == 1) return 0;   // stone — all faces
-        if (bid == 2) return 1;   // dirt — all faces
-        if (bid == 3) {            // grass
-          if (faceType == 0) return 2;  // grass_top
-          if (faceType == 2) return 1;  // dirt (bottom)
-          return 3;                      // grass_side
-        }
-        if (bid == 4) return 4;   // sand
-        if (bid == 5) return 5;   // water
-        if (bid == 6) return 6;   // snow
-        if (bid == 7) return 7;   // gravel
-        if (bid == 8) {            // log/wood
-          if (faceType == 1) return 9;   // wood_side
-          return 8;                       // wood_top (top & bottom)
-        }
-        if (bid == 9) return 10;  // leaves
-        return 0;
-      }
-
-      // Triplanar texture sampling for smooth meshes
-      vec3 triplanarSample(vec3 wp, vec3 n, int layer) {
-        vec3 blend = abs(n);
-        blend = max(blend, 0.00001);
-        blend /= (blend.x + blend.y + blend.z);
-        vec3 xc = texture(uTextureArray, vec3(fract(wp.yz), float(layer))).rgb;
-        vec3 yc = texture(uTextureArray, vec3(fract(wp.xz), float(layer))).rgb;
-        vec3 zc = texture(uTextureArray, vec3(fract(wp.xy), float(layer))).rgb;
-        return xc * blend.x + yc * blend.y + zc * blend.z;
-      }
-
-      // Get a secondary blending layer based on slope and height context.
-      // Steep slopes show dirt/stone, flat tops show grass, low areas show sand, etc.
-      int getBlendLayer(int bid, float slopeY, float wy) {
-        // Steep surfaces: blend toward dirt/stone
-        if (bid == 3 && slopeY < 0.7) return 1;    // grass → dirt on slopes
-        if (bid == 6 && slopeY < 0.7) return 0;    // snow → stone on slopes
-        if (bid == 4 && slopeY > 0.8) return 2;    // sand → grass_top on flat
-        if (bid == 2 && slopeY > 0.9) return 3;    // dirt → grass_side bleed
-        return -1; // no blend
-      }
-
-      void main() {
-        int bid = int(vBlockId + 0.5);
-
-        // Determine face type from normal
-        vec3 n = normalize(vNormal);
-        int faceType;
-        if (n.y > 0.5) faceType = 0;       // top
-        else if (n.y < -0.5) faceType = 2;  // bottom
-        else faceType = 1;                   // side
-
-        int layer = getTextureLayer(bid, faceType);
-
-        // Sample texture: triplanar for smooth, tiling UVs for greedy
-        vec3 color;
-        float texAlpha = 1.0;
-        if (uSmoothMode) {
-          color = triplanarSample(vWorldPos, n, layer);
-
-          // Texture blending: blend between block textures based on slope/height
-          if (uBlendTextures) {
-            int blendLayer = getBlendLayer(bid, n.y, vWorldPos.y);
-            if (blendLayer >= 0) {
-              vec3 blendColor = triplanarSample(vWorldPos, n, blendLayer);
-              // Blend amount based on how steep/flat the surface is
-              float slopeFactor = 1.0 - abs(n.y);  // 0 on flat, 1 on vertical
-              // For grass→dirt: blend more on steeper slopes
-              float blendAmount;
-              if (bid == 3) {
-                blendAmount = smoothstep(0.3, 0.7, slopeFactor); // grass→dirt
-              } else if (bid == 6) {
-                blendAmount = smoothstep(0.3, 0.7, slopeFactor); // snow→stone
-              } else {
-                blendAmount = smoothstep(0.5, 0.8, 1.0 - slopeFactor); // flat blends
-              }
-              // Add noise to break up the transition
-              float noise = fract(sin(dot(vWorldPos.xz, vec2(12.9898, 78.233))) * 43758.5453);
-              blendAmount = clamp(blendAmount + (noise - 0.5) * 0.2, 0.0, 1.0);
-              color = mix(color, blendColor, blendAmount);
-            }
-          }
-        } else {
-          vec2 tilingUv = fract(vUv);
-          vec4 texel = texture(uTextureArray, vec3(tilingUv, float(layer)));
-          color = texel.rgb;
-          texAlpha = texel.a;
-        }
-
-        // Alpha test for transparent blocks (leaves, etc.)
-        if (uAlphaTest && texAlpha < 0.5) discard;
-
-        // Lighting with directional shadows
-        vec3 lightDir = normalize(vec3(0.4, 0.8, 0.3));
-        float ndotl = dot(n, lightDir);
-        float shadow = getShadow(vShadowCoord);
-        float ambient = 0.35;
-        float directional = 0.65 * max(ndotl, 0.0) * shadow;
-
-        float aoFactor = 0.55 + 0.45 * vAo;
-        float skyFill = 0.08 * max(n.y, 0.0);
-
-        color *= ((ambient + directional) * aoFactor + skyFill);
-
-        // Water tint
-        if (bid == 5) {
-          color *= 0.85;
-          color += vec3(0.02, 0.04, 0.08);
-        }
-
-        // Fog centered on camera target (disabled in wireframe mode)
-        if (!uWireframe) {
-          float dist = length(vWorldPos.xz - uCameraTarget.xz);
-          float fogStart = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.7).toFixed(1)};
-          float fogEnd = ${(RENDER_DISTANCE * CHUNK_SIZE * 0.95).toFixed(1)};
-          float fog = 1.0 - smoothstep(fogStart, fogEnd, dist);
-          vec3 fogColor = vec3(0.529, 0.808, 0.922);
-          color = mix(fogColor, color, fog);
-        }
-
-        fragColor = vec4(color, texAlpha);
-      }
-    `,
-    uniforms: {
-      uCameraTarget: { value: new THREE.Vector3() },
-      uTextureArray: { value: textureArray },
-      uWireframe: { value: false },
-      uSmoothMode: { value: false },
-      uBlendTextures: { value: false },
-      uAlphaTest: { value: false },
-      uShadowMap: { value: null },
-      uShadowMatrix: { value: new THREE.Matrix4() },
-      uShadowMapSize: { value: new THREE.Vector2(2048, 2048) },
-      uShadowBias: { value: 0.002 },
-      uShadowNormalBias: { value: 0.3 },
-    },
-    side: THREE.DoubleSide,
-  });
-}
-
-function createTransparentMaterial(textureArray) {
-  const mat = createTerrainMaterial(textureArray);
-  mat.uniforms.uAlphaTest.value = true;
-  mat.transparent = true;
-  mat.depthWrite = true;
-  return mat;
-}
-
-// ── Scene setup ────────────────────────────────────
-function createScene(container) {
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setClearColor(0x87CEEB);
-  container.appendChild(renderer.domElement);
-
-  const scene = new THREE.Scene();
-
-  const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 500);
-  camera.position.set(16, 50, 16);
-
-  const controls = new PointerLockControls(camera, renderer.domElement);
-
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
-
-  return { renderer, scene, camera, controls };
-}
-
-// ── Keyboard movement (first person) ────────────────
-class KeyboardMover {
-  constructor(camera) {
-    this.camera = camera;
-    this.keys = {};
-    this.speed = 20; // world units per second
-
-    window.addEventListener('keydown', (e) => {
-      this.keys[e.code] = true;
-    });
-    window.addEventListener('keyup', (e) => {
-      this.keys[e.code] = false;
-    });
-  }
-
-  update(dt) {
-    if (dt <= 0 || dt > 0.1) return;
-
-    const move = new THREE.Vector3();
-
-    const forward = new THREE.Vector3();
-    this.camera.getWorldDirection(forward);
-    forward.y = 0;
-    forward.normalize();
-
-    const right = new THREE.Vector3();
-    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-    if (this.keys['KeyW'] || this.keys['ArrowUp'])    move.add(forward);
-    if (this.keys['KeyS'] || this.keys['ArrowDown'])   move.sub(forward);
-    if (this.keys['KeyD'] || this.keys['ArrowRight'])  move.add(right);
-    if (this.keys['KeyA'] || this.keys['ArrowLeft'])   move.sub(right);
-    if (this.keys['Space'])    move.y += 1;
-    if (this.keys['ShiftLeft'] || this.keys['ShiftRight']) move.y -= 1;
-
-    if (move.lengthSq() === 0) return;
-    move.normalize().multiplyScalar(this.speed * dt);
-    this.camera.position.add(move);
-  }
-}
-
-// ── Stats display ──────────────────────────────────
-function updateStats(renderer, chunkManager) {
-  const fmt = (n) => n.toLocaleString();
-  document.getElementById('stat-chunks').innerHTML = fmt(chunkManager.columnMeshes.size);
-  document.getElementById('stat-verts').innerHTML = fmt(renderer.info.render.triangles * 3);
-  document.getElementById('stat-tris').innerHTML = fmt(renderer.info.render.triangles);
-  document.getElementById('stat-time').innerHTML = fmt(chunkManager.pending.size + chunkManager.inflight.size);
-}
-
-// ── Worker Pool ───────────────────────────────────
-class MeshWorkerPool {
-  constructor(size) {
-    this.workers = [];
-    this.idle = [];
-    this.queue = [];
-    this.readyCount = 0;
-    this.size = size;
-
-    for (let i = 0; i < size; i++) {
-      const w = new Worker('./mesh-worker.js', { type: 'module' });
-      w.onmessage = (e) => this._onMessage(i, e.data);
-      w.pending = null; // { resolve, reject }
-      this.workers.push(w);
-    }
-  }
-
-  get ready() { return this.readyCount >= this.size; }
-
-  _onMessage(idx, msg) {
-    const w = this.workers[idx];
-    if (msg.type === 'ready') {
-      this.readyCount++;
-      this.idle.push(idx);
-      this._drain();
-      return;
-    }
-    if (w.pending) {
-      w.pending.resolve(msg);
-      w.pending = null;
-    }
-    this.idle.push(idx);
-    this._drain();
-  }
-
-  _drain() {
-    while (this.idle.length > 0 && this.queue.length > 0) {
-      const idx = this.idle.shift();
-      const { message, transferables, resolve, reject } = this.queue.shift();
-      this.workers[idx].pending = { resolve, reject };
-      this.workers[idx].postMessage(message, transferables || []);
-    }
-  }
-
-  send(message, transferables) {
-    return new Promise((resolve, reject) => {
-      this.queue.push({ message, transferables, resolve, reject });
-      this._drain();
-    });
-  }
-}
-
-// ── Chunk Manager (worker-based) ──────────────────
-// Terrain gen + meshing happen off the main thread.
-class ChunkManager {
-  constructor(scene, material, transparentMaterial) {
-    this.scene = scene;
-    this.material = material;
-    this.transparentMaterial = transparentMaterial;
-    this.mesherMode = 'greedy';
-
-    const poolSize = Math.max(2, Math.min(navigator.hardwareConcurrency - 1, 6));
-    this.pool = new MeshWorkerPool(poolSize);
-
-    // borderData: Map<chunkKey, { 0: Uint16Array, ... 5: Uint16Array }>
-    this.borderData = new Map();
-    // blockData: Map<chunkKey, Uint16Array> — raw block arrays for editing
-    this.blockData = new Map();
-    // columnMeshes: Map<colKey, THREE.Mesh>
-    this.columnMeshes = new Map();
-    // columnTransparentMeshes: Map<colKey, THREE.Mesh>
-    this.columnTransparentMeshes = new Map();
-    // inflight: Set<colKey> — columns currently being generated by workers
-    this.inflight = new Set();
-    // pending: Set<colKey> — columns queued for generation
-    this.pending = new Set();
-    // loadedCols: Set<colKey> — columns fully generated and meshed
-    this.loadedCols = new Set();
-
-    // Perf instrumentation
-    this.perfGenTimes = [];
-    this.perfMeshTimes = [];
-  }
-
-  key(cx, cy, cz) { return `${cx},${cy},${cz}`; }
-  colKey(cx, cz) { return `${cx},${cz}`; }
-
-  update(cameraCX, cameraCZ) {
-    if (!this.pool.ready) return;
-
-    // 1. Determine needed columns
-    const neededCols = new Set();
-    for (let dz = -RENDER_DISTANCE; dz <= RENDER_DISTANCE; dz++) {
-      for (let dx = -RENDER_DISTANCE; dx <= RENDER_DISTANCE; dx++) {
-        if (dx * dx + dz * dz > RENDER_DISTANCE * RENDER_DISTANCE) continue;
-        neededCols.add(this.colKey(cameraCX + dx, cameraCZ + dz));
-      }
-    }
-
-    // 2. Queue missing columns
-    for (const ck of neededCols) {
-      if (!this.loadedCols.has(ck) && !this.inflight.has(ck) && !this.pending.has(ck)) {
-        this.pending.add(ck);
-      }
-    }
-
-    // 3. Dispatch pending to workers (up to CHUNKS_PER_FRAME)
-    let dispatched = 0;
-    for (const ck of this.pending) {
-      if (dispatched >= CHUNKS_PER_FRAME) break;
-      const [cx, cz] = ck.split(',').map(Number);
-      this.pending.delete(ck);
-      this.inflight.add(ck);
-      dispatched++;
-
-      // Gather neighbor borders for X/Z directions
-      const neighborBorders = this._gatherNeighborBorders(cx, cz);
-      const t0 = performance.now();
-
-      this.pool.send({
-        type: 'generate',
-        cx, cz,
-        neighborBorders,
-        mesherMode: this.mesherMode,
-      }).then((msg) => {
-        this.perfMeshTimes.push(performance.now() - t0);
-        this.inflight.delete(ck);
-        this._handleColumnReady(msg);
-      });
-    }
-
-    // 4. Unload distant columns
-    const unloadCols = [];
-    for (const ck of this.loadedCols) {
-      const [cx, cz] = ck.split(',').map(Number);
-      const dx = cx - cameraCX;
-      const dz = cz - cameraCZ;
-      if (dx * dx + dz * dz > UNLOAD_DISTANCE * UNLOAD_DISTANCE) {
-        unloadCols.push(ck);
-      }
-    }
-    for (const ck of unloadCols) {
-      this._unloadColumn(ck);
-    }
-  }
-
-  _gatherNeighborBorders(cx, cz) {
-    const borders = {};
-    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
-      for (const [dcx, dcz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-        const nk = this.key(cx + dcx, cy, cz + dcz);
-        if (this.borderData.has(nk)) {
-          borders[nk] = this.borderData.get(nk);
-        }
-      }
-    }
-    return borders;
-  }
-
-  _handleColumnReady(msg) {
-    const { cx, cz, mesh, transparentMesh, borders, blockData } = msg;
-    const ck = this.colKey(cx, cz);
-
-    // Store borders and block data
-    for (const [key, faceData] of Object.entries(borders)) {
-      this.borderData.set(key, faceData);
-    }
-    if (blockData) {
-      for (const [key, data] of Object.entries(blockData)) {
-        this.blockData.set(key, data);
-      }
-    }
-
-    this.loadedCols.add(ck);
-
-    // Create Three.js meshes (opaque + transparent)
-    this._removeColumnMesh(ck);
-    if (mesh) {
-      this._createMesh(ck, cx, cz, mesh);
-    }
-    if (transparentMesh) {
-      this._createTransparentMesh(ck, cx, cz, transparentMesh);
-    }
-
-    // Queue neighbor remeshes (they now have updated border data)
-    this._remeshNeighborColumns(cx, cz);
-  }
-
-  _createMesh(ck, cx, cz, mesh) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
-    geometry.setAttribute('ao', new THREE.BufferAttribute(mesh.ao, 1));
-    geometry.setAttribute('blockId', new THREE.BufferAttribute(mesh.blockIds, 1));
-    geometry.setAttribute('texUv', new THREE.BufferAttribute(mesh.uvs, 2));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    geometry.computeBoundingBox();
-
-    const m = new THREE.Mesh(geometry, this.material);
-    m.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-    this.scene.add(m);
-    this.columnMeshes.set(ck, m);
-  }
-
-  _createTransparentMesh(ck, cx, cz, mesh) {
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(mesh.normals, 3));
-    geometry.setAttribute('ao', new THREE.BufferAttribute(mesh.ao, 1));
-    geometry.setAttribute('blockId', new THREE.BufferAttribute(mesh.blockIds, 1));
-    geometry.setAttribute('texUv', new THREE.BufferAttribute(mesh.uvs, 2));
-    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
-    geometry.computeBoundingBox();
-
-    const m = new THREE.Mesh(geometry, this.transparentMaterial);
-    m.renderOrder = 1;
-    m.position.set(cx * CHUNK_SIZE, 0, cz * CHUNK_SIZE);
-    this.scene.add(m);
-    this.columnTransparentMeshes.set(ck, m);
-  }
-
-  _remeshNeighborColumns(cx, cz) {
-    for (const [dx, dz] of [[1,0],[-1,0],[0,1],[0,-1]]) {
-      const ncx = cx + dx, ncz = cz + dz;
-      const nck = this.colKey(ncx, ncz);
-      if (this.loadedCols.has(nck) && !this.inflight.has(nck)) {
-        this._remeshColumnAsync(ncx, ncz);
-      }
-    }
-  }
-
-  _remeshColumnAsync(cx, cz) {
-    const ck = this.colKey(cx, cz);
-    this.inflight.add(ck);
-
-    // Gather block data for this column
-    const colBlockData = {};
-    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
-      const key = this.key(cx, cy, cz);
-      if (this.blockData.has(key)) {
-        colBlockData[key] = this.blockData.get(key);
-      }
-    }
-
-    const neighborBorders = this._gatherNeighborBorders(cx, cz);
-
-    this.pool.send({
-      type: 'remesh',
-      cx, cz,
-      blockData: colBlockData,
-      neighborBorders,
-      mesherMode: this.mesherMode,
-    }).then((msg) => {
-      this.inflight.delete(ck);
-      const { mesh, transparentMesh, borders } = msg;
-
-      // Update borders
-      for (const [key, faceData] of Object.entries(borders)) {
-        this.borderData.set(key, faceData);
-      }
-
-      this._removeColumnMesh(ck);
-      if (mesh) {
-        this._createMesh(ck, cx, cz, mesh);
-      }
-      if (transparentMesh) {
-        this._createTransparentMesh(ck, cx, cz, transparentMesh);
-      }
-    });
-  }
-
-  _removeColumnMesh(ck) {
-    const existing = this.columnMeshes.get(ck);
-    if (existing) {
-      this.scene.remove(existing);
-      existing.geometry.dispose();
-      this.columnMeshes.delete(ck);
-    }
-    const existingT = this.columnTransparentMeshes.get(ck);
-    if (existingT) {
-      this.scene.remove(existingT);
-      existingT.geometry.dispose();
-      this.columnTransparentMeshes.delete(ck);
-    }
-  }
-
-  _unloadColumn(ck) {
-    this._removeColumnMesh(ck);
-    const [cx, cz] = ck.split(',').map(Number);
-    this.loadedCols.delete(ck);
-    for (let cy = 0; cy < WORLD_HEIGHT_CHUNKS; cy++) {
-      const k = this.key(cx, cy, cz);
-      this.borderData.delete(k);
-      this.blockData.delete(k);
-    }
-  }
-
-  // Remesh a single column (used by block editing)
-  remeshColumn(cx, cz) {
-    this._remeshColumnAsync(cx, cz);
-  }
-}
-
-// ── Brush modes ───────────────────────────────────
-// Each brush returns an array of {x,y,z} offsets from the center block.
-const BRUSH_SINGLE = 'single';
-const BRUSH_SPHERE = 'sphere';
-const BRUSH_LINE   = 'line';
-
-let currentBrush = BRUSH_SINGLE;
-let brushRadius = 2;
-
-function getBrushOffsets(brush, radius, normal) {
-  const offsets = [];
-  if (brush === BRUSH_SINGLE) {
-    offsets.push({ x: 0, y: 0, z: 0 });
-  } else if (brush === BRUSH_SPHERE) {
-    const r = radius;
-    const r2 = r * r;
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dy = -r; dy <= r; dy++) {
-        for (let dz = -r; dz <= r; dz++) {
-          if (dx * dx + dy * dy + dz * dz <= r2) {
-            offsets.push({ x: dx, y: dy, z: dz });
-          }
-        }
-      }
-    }
-  } else if (brush === BRUSH_LINE) {
-    // Extrude a flat disc along the face normal
-    const r = radius;
-    const r2 = r * r;
-    // Determine which axes the disc covers (perpendicular to normal)
-    const nx = Math.abs(normal.x) > 0.5;
-    const ny = Math.abs(normal.y) > 0.5;
-    const nz = Math.abs(normal.z) > 0.5;
-    for (let da = -r; da <= r; da++) {
-      for (let db = -r; db <= r; db++) {
-        if (da * da + db * db > r2) continue;
-        if (nx)      offsets.push({ x: 0, y: da, z: db });
-        else if (ny) offsets.push({ x: da, y: 0, z: db });
-        else         offsets.push({ x: da, y: db, z: 0 });
-      }
-    }
-  }
-  return offsets;
-}
-
-// ── Voxel editing ─────────────────────────────────
-function worldToChunkLocal(wx, wy, wz) {
-  const cx = Math.floor(wx / CHUNK_SIZE);
-  const cy = Math.floor(wy / CHUNK_SIZE);
-  const cz = Math.floor(wz / CHUNK_SIZE);
-  const lx = ((wx % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  const ly = ((wy % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  const lz = ((wz % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE;
-  return { cx, cy, cz, lx, ly, lz };
-}
-
-// Batch edit: group blocks by chunk, modify blockData arrays, remesh.
-function batchEditBlocks(chunkManager, edits) {
-  const worldHeight = WORLD_HEIGHT_CHUNKS * CHUNK_SIZE;
-  const s = CHUNK_SIZE;
-  // Group edits by chunk key
-  const byChunk = new Map();
-  for (const { x: wx, y: wy, z: wz, blockId } of edits) {
-    if (wy < 0 || wy >= worldHeight) continue;
-    const { cx, cy, cz, lx, ly, lz } = worldToChunkLocal(wx, wy, wz);
-    const k = chunkManager.key(cx, cy, cz);
-    const blocks = chunkManager.blockData.get(k);
-    if (!blocks) continue;
-
-    if (!byChunk.has(k)) {
-      byChunk.set(k, { cx, cy, cz, edits: [], boundaries: new Set() });
-    }
-    const entry = byChunk.get(k);
-    entry.edits.push({ lx, ly, lz, blockId });
-
-    if (lx === 0)              entry.boundaries.add(chunkManager.key(cx - 1, cy, cz));
-    if (lx === s - 1)          entry.boundaries.add(chunkManager.key(cx + 1, cy, cz));
-    if (ly === 0)              entry.boundaries.add(chunkManager.key(cx, cy - 1, cz));
-    if (ly === s - 1)          entry.boundaries.add(chunkManager.key(cx, cy + 1, cz));
-    if (lz === 0)              entry.boundaries.add(chunkManager.key(cx, cy, cz - 1));
-    if (lz === s - 1)          entry.boundaries.add(chunkManager.key(cx, cy, cz + 1));
-  }
-
-  // Apply edits to blockData arrays and update borders
-  const remeshCols = new Set();
-  for (const [k, { cx, cy, cz, edits: chunkEdits, boundaries }] of byChunk) {
-    const blocks = chunkManager.blockData.get(k);
-    for (const { lx, ly, lz, blockId } of chunkEdits) {
-      blocks[lx + ly * s + lz * s * s] = blockId;
-    }
-    // Update border data for this chunk (neighbors will pick it up)
-    const borderObj = {};
-    for (let face = 0; face < 6; face++) {
-      borderObj[face] = extractBorderFromArray(blocks, s, face);
-    }
-    chunkManager.borderData.set(k, borderObj);
-
-    remeshCols.add(chunkManager.colKey(cx, cz));
-    for (const bk of boundaries) {
-      if (!chunkManager.blockData.has(bk)) continue;
-      const [bcx, , bcz] = bk.split(',').map(Number);
-      remeshCols.add(chunkManager.colKey(bcx, bcz));
-    }
-  }
-
-  for (const ck of remeshCols) {
-    const [cx, cz] = ck.split(',').map(Number);
-    chunkManager.remeshColumn(cx, cz);
-  }
-}
-
-// Extract a face border from a flat block array (matches Chunk::extract_border)
-function extractBorderFromArray(blocks, s, face) {
-  const border = new Uint16Array(s * s);
-  for (let a = 0; a < s; a++) {
-    for (let b = 0; b < s; b++) {
-      let x, y, z;
-      switch (face) {
-        case 0: x = s - 1; y = a; z = b; break; // PosX
-        case 1: x = 0;     y = a; z = b; break; // NegX
-        case 2: x = b;     y = s - 1; z = a; break; // PosY
-        case 3: x = b;     y = 0;     z = a; break; // NegY
-        case 4: x = b;     y = a; z = s - 1; break; // PosZ
-        case 5: x = b;     y = a; z = 0;     break; // NegZ
-      }
-      border[b + a * s] = blocks[x + y * s + z * s * s];
-    }
-  }
-  return border;
-}
-
-// Single-block edit (convenience wrapper)
-function editBlock(chunkManager, wx, wy, wz, blockId) {
-  batchEditBlocks(chunkManager, [{ x: wx, y: wy, z: wz, blockId }]);
-}
-
-// Brush edit: expand a center point into brush offsets, then batch edit.
-function brushEdit(chunkManager, center, blockId, normal) {
-  const offsets = getBrushOffsets(currentBrush, brushRadius, normal);
-  const edits = offsets.map(o => ({
-    x: center.x + o.x, y: center.y + o.y, z: center.z + o.z, blockId,
-  }));
-  batchEditBlocks(chunkManager, edits);
-}
-
-function getTargetBlock(raycaster, mouse, camera, chunkManager) {
-  raycaster.setFromCamera(mouse, camera);
-  const meshes = [
-    ...chunkManager.columnMeshes.values(),
-    ...chunkManager.columnTransparentMeshes.values(),
-  ];
-  const hits = raycaster.intersectObjects(meshes, false);
-  if (hits.length === 0) return null;
-
-  const hit = hits[0];
-  const p = hit.point;
-  const n = hit.face.normal;
-
-  // Block that owns the hit face (nudge inward)
-  const breakX = Math.floor(p.x - n.x * 0.01);
-  const breakY = Math.floor(p.y - n.y * 0.01);
-  const breakZ = Math.floor(p.z - n.z * 0.01);
-
-  // Adjacent empty block (nudge outward)
-  const placeX = Math.floor(p.x + n.x * 0.01);
-  const placeY = Math.floor(p.y + n.y * 0.01);
-  const placeZ = Math.floor(p.z + n.z * 0.01);
-
-  return {
-    breakPos: { x: breakX, y: breakY, z: breakZ },
-    placePos: { x: placeX, y: placeY, z: placeZ },
-    normal: n,
-  };
-}
-
-function updateBlockToolbar(activeId) {
-  document.querySelectorAll('.block-slot').forEach(el => {
-    el.classList.toggle('active', Number(el.dataset.block) === activeId);
-  });
-}
-
-function updateBrushUI() {
-  document.querySelectorAll('.brush-btn').forEach(el => {
-    el.classList.toggle('active', el.dataset.brush === currentBrush);
-  });
-  document.getElementById('radius-val').textContent = brushRadius;
-  const radCtrl = document.getElementById('radius-ctrl');
-  radCtrl.style.display = currentBrush === BRUSH_SINGLE ? 'none' : 'flex';
-}
-
-// ── Performance test flythrough ────────────────────
-class PerfFlythrough {
-  constructor(camera, duration = 20) {
-    this.camera = camera;
-    this.duration = duration; // seconds
-    this.elapsed = 0;
-    this.done = false;
-
-    // Circular path params — orbit around the spawn area
-    this.centerX = 16;
-    this.centerZ = 16;
-    this.radius = 160;    // world units (~5 chunks out)
-    this.height = 70;     // Y position
-    this.lookY = 40;      // look at this height
-
-    this.frameTimes = [];
-    this.startTime = null;
-  }
-
-  update(dt) {
-    if (this.done) return;
-    if (this.startTime === null) this.startTime = performance.now();
-
-    this.elapsed += dt;
-    if (this.elapsed >= this.duration) {
-      this.done = true;
-      return;
-    }
-
-    const t = this.elapsed / this.duration;
-
-    // Full circle over the duration
-    const angle = t * Math.PI * 2;
-    const x = this.centerX + Math.cos(angle) * this.radius;
-    const z = this.centerZ + Math.sin(angle) * this.radius;
-
-    // Gentle height oscillation
-    const y = this.height + Math.sin(angle * 2) * 15;
-
-    this.camera.position.set(x, y, z);
-    this.camera.lookAt(this.centerX, this.lookY, this.centerZ);
-  }
-
-  recordFrame(frameMs) {
-    this.frameTimes.push(frameMs);
-  }
-
-  getReport(chunkManager, renderer) {
-    const ft = this.frameTimes.slice().sort((a, b) => a - b);
-    const sum = (arr) => arr.reduce((s, v) => s + v, 0);
-    const avg = (arr) => arr.length ? sum(arr) / arr.length : 0;
-    const pct = (arr, p) => arr.length ? arr[Math.floor(arr.length * p)] : 0;
-
-    const genTimes = chunkManager.perfGenTimes.slice().sort((a, b) => a - b);
-    const meshTimes = chunkManager.perfMeshTimes.slice().sort((a, b) => a - b);
-
-    const wallMs = performance.now() - this.startTime;
-
-    return {
-      wall: wallMs,
-      frames: ft.length,
-      avgFps: ft.length / (wallMs / 1000),
-      frame: {
-        avg: avg(ft),
-        min: ft[0] || 0,
-        max: ft[ft.length - 1] || 0,
-        p50: pct(ft, 0.5),
-        p95: pct(ft, 0.95),
-        p99: pct(ft, 0.99),
-      },
-      gen: {
-        count: genTimes.length,
-        total: sum(genTimes),
-        avg: avg(genTimes),
-        p95: pct(genTimes, 0.95),
-        max: genTimes[genTimes.length - 1] || 0,
-      },
-      mesh: {
-        count: meshTimes.length,
-        total: sum(meshTimes),
-        avg: avg(meshTimes),
-        p95: pct(meshTimes, 0.95),
-        max: meshTimes[meshTimes.length - 1] || 0,
-      },
-      columns: chunkManager.columnMeshes.size,
-      tris: renderer.info.render.triangles,
-    };
-  }
-}
-
-function createPerfHUD() {
-  const hud = document.createElement('div');
-  hud.id = 'perf-hud';
-  hud.style.cssText = `
-    position: fixed; top: 20px; left: 20px; z-index: 100;
-    background: rgba(0,0,0,0.85); border: 1px solid rgba(127,204,129,0.3);
-    border-radius: 8px; padding: 16px 20px; min-width: 300px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    color: rgba(255,255,255,0.87); line-height: 1.6;
-  `;
-  hud.innerHTML = `
-    <div style="color:#7fcc81; font-weight:700; font-size:14px; margin-bottom:8px;">
-      PERF TEST<span id="perf-phase" style="color:rgba(255,255,255,0.4); font-weight:400; margin-left:8px">starting...</span>
-    </div>
-    <div id="perf-live">
-      <div>FPS: <span id="perf-fps">—</span></div>
-      <div>Frame: <span id="perf-frame">—</span>ms</div>
-      <div>Progress: <span id="perf-progress">0</span>%</div>
-      <div>Columns: <span id="perf-cols">0</span></div>
-      <div>Chunks gen'd: <span id="perf-gens">0</span></div>
-      <div>Columns meshed: <span id="perf-meshes">0</span></div>
-    </div>
-    <div id="perf-report" style="display:none"></div>
-  `;
-  document.body.appendChild(hud);
-  return hud;
-}
-
-function updatePerfHUD(flythrough, chunkManager) {
-  const pct = Math.min(100, Math.round(flythrough.elapsed / flythrough.duration * 100));
-  const ft = flythrough.frameTimes;
-  const recentFps = ft.length > 30
-    ? Math.round(30 / (ft.slice(-30).reduce((s, v) => s + v, 0) / 1000))
-    : '—';
-  const lastFrame = ft.length ? ft[ft.length - 1].toFixed(1) : '—';
-
-  document.getElementById('perf-fps').textContent = recentFps;
-  document.getElementById('perf-frame').textContent = lastFrame;
-  document.getElementById('perf-progress').textContent = pct;
-  document.getElementById('perf-cols').textContent = chunkManager.columnMeshes.size;
-  document.getElementById('perf-gens').textContent = chunkManager.perfGenTimes.length;
-  document.getElementById('perf-meshes').textContent = chunkManager.perfMeshTimes.length;
-  document.getElementById('perf-phase').textContent = 'running';
-}
-
-function showPerfReport(report, frameTimes) {
-  const f = (n) => typeof n === 'number' ? n.toFixed(2) : n;
-  document.getElementById('perf-phase').textContent = 'complete';
-  document.getElementById('perf-live').style.display = 'none';
-  const el = document.getElementById('perf-report');
-  el.style.display = 'block';
-  el.innerHTML = `
-    <table style="border-collapse:collapse; width:100%;">
-      <tr><td colspan="2" style="color:#7fcc81; padding:4px 0; font-weight:500;">Frames</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${report.frames}</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg fps</td><td>${f(report.avgFps)}</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.frame.avg)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p50</td><td>${f(report.frame.p50)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.frame.p95)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p99</td><td>${f(report.frame.p99)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">min / max</td><td>${f(report.frame.min)} / ${f(report.frame.max)} ms</td></tr>
-
-      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Terrain Gen (${report.gen.count} chunks)</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${f(report.gen.total)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.gen.avg)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.gen.p95)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">max</td><td>${f(report.gen.max)} ms</td></tr>
-
-      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Meshing (${report.mesh.count} columns)</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">total</td><td>${f(report.mesh.total)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">avg</td><td>${f(report.mesh.avg)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">p95</td><td>${f(report.mesh.p95)} ms</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">max</td><td>${f(report.mesh.max)} ms</td></tr>
-
-      <tr><td colspan="2" style="color:#7fcc81; padding:8px 0 4px; font-weight:500;">Scene</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">columns</td><td>${report.columns}</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">triangles</td><td>${report.tris.toLocaleString()}</td></tr>
-      <tr><td style="color:rgba(255,255,255,0.5); padding:1px 8px 1px 0;">wall time</td><td>${f(report.wall / 1000)} s</td></tr>
-    </table>
-    <div style="margin-top:12px; color:rgba(255,255,255,0.3); font-size:10px;">
-      Press R to re-run · Open without ?perf for normal mode
-    </div>
-  `;
-
-  // Draw frame time graph
-  drawFrameGraph(frameTimes, report);
-
-  // Console: clean text report
-  const lines = [
-    `[perf] === PERF TEST COMPLETE ===`,
-    `[perf] Frames: ${report.frames} | avg fps: ${f(report.avgFps)}`,
-    `[perf] Frame ms — avg: ${f(report.frame.avg)}, p50: ${f(report.frame.p50)}, p95: ${f(report.frame.p95)}, p99: ${f(report.frame.p99)}, min: ${f(report.frame.min)}, max: ${f(report.frame.max)}`,
-    `[perf] Terrain gen (${report.gen.count} chunks) — total: ${f(report.gen.total)}ms, avg: ${f(report.gen.avg)}ms, p95: ${f(report.gen.p95)}ms, max: ${f(report.gen.max)}ms`,
-    `[perf] Meshing (${report.mesh.count} cols) — total: ${f(report.mesh.total)}ms, avg: ${f(report.mesh.avg)}ms, p95: ${f(report.mesh.p95)}ms, max: ${f(report.mesh.max)}ms`,
-    `[perf] Scene: ${report.columns} columns, ${report.tris.toLocaleString()} tris, wall: ${f(report.wall / 1000)}s`,
-  ];
-  console.log(lines.join('\n'));
-
-  // Console: frame graph as ASCII sparkline (80 buckets)
-  const bucketCount = 80;
-  const bucketSize = Math.ceil(frameTimes.length / bucketCount);
-  const buckets = [];
-  for (let i = 0; i < bucketCount; i++) {
-    const slice = frameTimes.slice(i * bucketSize, (i + 1) * bucketSize);
-    if (slice.length === 0) break;
-    buckets.push(Math.max(...slice));
-  }
-  const maxBucket = Math.max(...buckets);
-  const bars = ' ▁▂▃▄▅▆▇█';
-  const sparkline = buckets.map(v => {
-    const idx = Math.min(bars.length - 1, Math.round((v / maxBucket) * (bars.length - 1)));
-    return bars[idx];
-  }).join('');
-  console.log(`[perf] Frame graph (max ${f(maxBucket)}ms):\n[perf] ${sparkline}`);
-
-  // Console: list spikes (frames > 2x the p95)
-  const spikeThreshold = report.frame.p95 * 2;
-  const spikes = [];
-  for (let i = 0; i < frameTimes.length; i++) {
-    if (frameTimes[i] > spikeThreshold) {
-      spikes.push({ frame: i, ms: frameTimes[i] });
-    }
-  }
-  if (spikes.length > 0) {
-    const top = spikes.sort((a, b) => b.ms - a.ms).slice(0, 10);
-    console.log(`[perf] Spikes (>${f(spikeThreshold)}ms): ${top.map(s => `frame ${s.frame}: ${f(s.ms)}ms`).join(', ')}`);
-  } else {
-    console.log(`[perf] No spikes above ${f(spikeThreshold)}ms`);
-  }
-}
-
-function drawFrameGraph(frameTimes, report) {
-  const canvas = document.createElement('canvas');
-  const W = 600, H = 180;
-  canvas.width = W;
-  canvas.height = H;
-  canvas.style.cssText = `
-    position: fixed; bottom: 20px; left: 20px; z-index: 100;
-    border: 1px solid rgba(127,204,129,0.3); border-radius: 6px;
-    background: rgba(0,0,0,0.85);
-  `;
-  document.body.appendChild(canvas);
-
-  const ctx = canvas.getContext('2d');
-  const pad = { top: 24, right: 12, bottom: 24, left: 48 };
-  const gw = W - pad.left - pad.right;
-  const gh = H - pad.top - pad.bottom;
-
-  // Cap Y axis at p99 * 1.5 so spikes don't squash everything
-  const yMax = Math.max(report.frame.p99 * 1.5, 20);
-
-  // Title
-  ctx.fillStyle = '#7fcc81';
-  ctx.font = '11px JetBrains Mono, monospace';
-  ctx.fillText('Frame Time (ms)', pad.left, 15);
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.font = '9px JetBrains Mono, monospace';
-  ctx.fillText(`cap: ${yMax.toFixed(0)}ms`, W - 70, 15);
-
-  // Y axis labels + gridlines
-  const yTicks = [0, yMax * 0.25, yMax * 0.5, yMax * 0.75, yMax];
-  ctx.font = '9px JetBrains Mono, monospace';
-  for (const tick of yTicks) {
-    const y = pad.top + gh - (tick / yMax) * gh;
-    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y);
-    ctx.lineTo(W - pad.right, y);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    ctx.fillText(tick.toFixed(0), 4, y + 3);
-  }
-
-  // 16.67ms target line (60fps)
-  if (16.67 < yMax) {
-    const y60 = pad.top + gh - (16.67 / yMax) * gh;
-    ctx.strokeStyle = 'rgba(127,204,129,0.4)';
-    ctx.setLineDash([4, 4]);
-    ctx.beginPath();
-    ctx.moveTo(pad.left, y60);
-    ctx.lineTo(W - pad.right, y60);
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.fillStyle = 'rgba(127,204,129,0.5)';
-    ctx.fillText('60fps', W - pad.right - 30, y60 - 3);
-  }
-
-  // X axis label
-  ctx.fillStyle = 'rgba(255,255,255,0.3)';
-  ctx.fillText('0s', pad.left, H - 4);
-  ctx.fillText(`${(report.wall / 1000).toFixed(0)}s`, W - pad.right - 12, H - 4);
-
-  // Draw frame bars
-  const barW = Math.max(1, gw / frameTimes.length);
-  for (let i = 0; i < frameTimes.length; i++) {
-    const ms = frameTimes[i];
-    const barH = Math.min(gh, (ms / yMax) * gh);
-    const x = pad.left + (i / frameTimes.length) * gw;
-    const y = pad.top + gh - barH;
-
-    // Color: green < 16ms, yellow < p95, red >= p95
-    if (ms > report.frame.p95) {
-      ctx.fillStyle = ms > yMax ? '#ff4444' : '#e8834a';
-    } else if (ms > 16.67) {
-      ctx.fillStyle = '#c9a227';
-    } else {
-      ctx.fillStyle = '#7fcc81';
-    }
-    ctx.fillRect(x, y, Math.max(barW, 1), barH);
-  }
-}
-
-// ── Main ───────────────────────────────────────────
-async function main() {
-  const textureArray = await loadTextureArray();
-
-  const container = document.getElementById('scene-container');
-  const { renderer, scene, camera, controls } = createScene(container);
-
-  const material = createTerrainMaterial(textureArray);
-  const transparentMaterial = createTransparentMaterial(textureArray);
-
-  // ── Shadow map setup ──────────────────────────────
-  const SHADOW_MAP_SIZE = 2048;
-  const SHADOW_FRUSTUM = 128; // half-size in world units
-
-  const shadowTarget = new THREE.WebGLRenderTarget(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-  shadowTarget.depthTexture = new THREE.DepthTexture(SHADOW_MAP_SIZE, SHADOW_MAP_SIZE);
-  shadowTarget.depthTexture.type = THREE.UnsignedIntType;
-
-  const shadowCamera = new THREE.OrthographicCamera(
-    -SHADOW_FRUSTUM, SHADOW_FRUSTUM, SHADOW_FRUSTUM, -SHADOW_FRUSTUM, 1, 512
-  );
-  const lightDir = new THREE.Vector3(0.4, 0.8, 0.3).normalize();
-
-  const depthMaterial = new THREE.MeshBasicMaterial({ colorWrite: false });
-
-  // Bias matrix: NDC [-1,1] → UV [0,1]
-  const shadowBiasMatrix = new THREE.Matrix4().set(
-    0.5, 0.0, 0.0, 0.5,
-    0.0, 0.5, 0.0, 0.5,
-    0.0, 0.0, 0.5, 0.5,
-    0.0, 0.0, 0.0, 1.0,
-  );
-  const shadowMatrix = new THREE.Matrix4();
-  const texelSize = (SHADOW_FRUSTUM * 2) / SHADOW_MAP_SIZE;
-
-  // Wire shadow map into both materials
-  material.uniforms.uShadowMap.value = shadowTarget.depthTexture;
-  transparentMaterial.uniforms.uShadowMap.value = shadowTarget.depthTexture;
-
-  function updateShadow(camPos) {
-    // Position shadow camera along light direction from player
-    shadowCamera.position.copy(camPos).addScaledVector(lightDir, 200);
-    shadowCamera.lookAt(camPos);
-    shadowCamera.updateMatrixWorld(true);
-
-    // Snap to texel grid to prevent shadow shimmer
-    const lightView = shadowCamera.matrixWorldInverse;
-    const projected = camPos.clone().applyMatrix4(lightView);
-    projected.x = Math.floor(projected.x / texelSize) * texelSize;
-    projected.y = Math.floor(projected.y / texelSize) * texelSize;
-    const snapped = projected.applyMatrix4(shadowCamera.matrixWorld);
-    shadowCamera.position.copy(snapped).addScaledVector(lightDir, 200);
-    shadowCamera.lookAt(snapped);
-    shadowCamera.updateMatrixWorld(true);
-
-    // Compute shadow matrix: biasMatrix * proj * view
-    shadowMatrix.copy(shadowBiasMatrix)
-      .multiply(shadowCamera.projectionMatrix)
-      .multiply(shadowCamera.matrixWorldInverse);
-
-    material.uniforms.uShadowMatrix.value.copy(shadowMatrix);
-    transparentMaterial.uniforms.uShadowMatrix.value.copy(shadowMatrix);
-  }
-
-  function renderShadowPass() {
-    scene.overrideMaterial = depthMaterial;
-    renderer.setRenderTarget(shadowTarget);
-    renderer.clear();
-    renderer.render(scene, shadowCamera);
-    scene.overrideMaterial = null;
-    renderer.setRenderTarget(null);
-  }
-
-  const chunkManager = new ChunkManager(scene, material, transparentMaterial);
-  const mover = new KeyboardMover(camera);
-
-  // Queue for gradual remesh when toggling mesher mode
-  let remeshQueue = [];
-
-  function toggleMesherMode() {
-    if (chunkManager.mesherMode === 'greedy') {
-      chunkManager.mesherMode = 'smooth';
-      material.uniforms.uSmoothMode.value = true;
-      transparentMaterial.uniforms.uSmoothMode.value = true;
-    } else {
-      chunkManager.mesherMode = 'greedy';
-      material.uniforms.uSmoothMode.value = false;
-      transparentMaterial.uniforms.uSmoothMode.value = false;
-    }
-    // Queue all loaded columns for gradual remesh (3 per frame)
-    remeshQueue = [];
-    for (const ck of chunkManager.loadedCols) {
-      remeshQueue.push(ck);
-    }
-  }
-
-  function processRemeshQueue() {
-    const batch = Math.min(3, remeshQueue.length);
-    for (let i = 0; i < batch; i++) {
-      const ck = remeshQueue.shift();
-      const [cx, cz] = ck.split(',').map(Number);
-      chunkManager.remeshColumn(cx, cz);
-    }
-  }
-
-  // ── Editing state ──
-  let selectedBlockId = BLOCK_STONE;
-  const raycaster = new THREE.Raycaster();
-  raycaster.far = 100;
-  // First person: raycast always from screen center
-  const screenCenter = new THREE.Vector2(0, 0);
-
-  // Highlight preview — wireframe cubes matching brush shape
-  const hlBoxGeo = new THREE.BoxGeometry(1.01, 1.01, 1.01);
-  const hlEdgesGeo = new THREE.EdgesGeometry(hlBoxGeo);
-  const hlMat = new THREE.LineBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.35, depthTest: false,
-  });
-  let hlGroup = new THREE.Group();
-  hlGroup.renderOrder = 999;
-  hlGroup.visible = false;
-  scene.add(hlGroup);
-  let hlLastRadius = -1;
-  let hlLastBrush = '';
-  let hlLastNormal = '';
-
-  function rebuildHighlight(normal) {
-    const nKey = normal ? `${Math.round(normal.x)},${Math.round(normal.y)},${Math.round(normal.z)}` : '0,1,0';
-    if (hlLastBrush === currentBrush && hlLastRadius === brushRadius && hlLastNormal === nKey) return;
-    hlLastBrush = currentBrush;
-    hlLastRadius = brushRadius;
-    hlLastNormal = nKey;
-
-    while (hlGroup.children.length) {
-      hlGroup.remove(hlGroup.children[0]);
-    }
-
-    const n = normal || { x: 0, y: 1, z: 0 };
-    const offsets = getBrushOffsets(currentBrush, brushRadius, n);
-    for (const o of offsets) {
-      const line = new THREE.LineSegments(hlEdgesGeo, hlMat);
-      line.position.set(o.x, o.y, o.z);
-      hlGroup.add(line);
-    }
-  }
-  rebuildHighlight(null);
-
-  // ── Pointer lock ──
-  // Click canvas to lock, ESC to unlock
-  renderer.domElement.addEventListener('click', () => {
-    if (!controls.isLocked) controls.lock();
-  });
-
-  // Left click = break, right click = place (while locked)
-  document.addEventListener('mousedown', (e) => {
-    if (!controls.isLocked) return;
-    const target = getTargetBlock(raycaster, screenCenter, camera, chunkManager);
-    if (!target) return;
-
-    if (e.button === 0) {
-      brushEdit(chunkManager, target.breakPos, BLOCK_AIR, target.normal);
-    } else if (e.button === 2) {
-      brushEdit(chunkManager, target.placePos, selectedBlockId, target.normal);
-    }
-  });
-
-  document.addEventListener('contextmenu', (e) => {
-    if (controls.isLocked) e.preventDefault();
-  });
-
-  // Block selection (number keys 1-9), brush keys (B cycle, [ ] radius)
-  window.addEventListener('keydown', (e) => {
-    const num = parseInt(e.key);
-    if (num >= 1 && num <= 9) {
-      selectedBlockId = num;
-      updateBlockToolbar(num);
-    } else if (e.code === 'KeyB') {
-      const modes = [BRUSH_SINGLE, BRUSH_SPHERE, BRUSH_LINE];
-      currentBrush = modes[(modes.indexOf(currentBrush) + 1) % modes.length];
-      updateBrushUI();
-    } else if (e.code === 'KeyF') {
-      material.wireframe = !material.wireframe;
-      material.uniforms.uWireframe.value = material.wireframe;
-      transparentMaterial.wireframe = material.wireframe;
-      transparentMaterial.uniforms.uWireframe.value = material.wireframe;
-      document.getElementById('stat-wireframe').textContent = material.wireframe ? 'ON' : 'OFF';
-    } else if (e.code === 'KeyM') {
-      toggleMesherMode();
-    } else if (e.code === 'KeyT') {
-      if (chunkManager.mesherMode === 'smooth') {
-        material.uniforms.uBlendTextures.value = !material.uniforms.uBlendTextures.value;
-        transparentMaterial.uniforms.uBlendTextures.value = material.uniforms.uBlendTextures.value;
-      }
-    } else if (e.key === '[') {
-      brushRadius = Math.max(1, brushRadius - 1);
-      updateBrushUI();
-    } else if (e.key === ']') {
-      brushRadius = Math.min(6, brushRadius + 1);
-      updateBrushUI();
-    }
-  });
-
-  // Toolbar click selection (works when unlocked)
-  document.querySelectorAll('.block-slot').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectedBlockId = Number(el.dataset.block);
-      updateBlockToolbar(selectedBlockId);
-    });
-  });
-
-  document.querySelectorAll('.brush-btn').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      currentBrush = el.dataset.brush;
-      updateBrushUI();
-    });
-  });
-  document.getElementById('radius-dec').addEventListener('click', (e) => {
-    e.stopPropagation();
-    brushRadius = Math.max(1, brushRadius - 1);
-    updateBrushUI();
-  });
-  document.getElementById('radius-inc').addEventListener('click', (e) => {
-    e.stopPropagation();
-    brushRadius = Math.min(6, brushRadius + 1);
-    updateBrushUI();
-  });
-
-  document.getElementById('stat-wireframe').addEventListener('click', (e) => {
-    e.stopPropagation();
-    material.wireframe = !material.wireframe;
-    material.uniforms.uWireframe.value = material.wireframe;
-    transparentMaterial.wireframe = material.wireframe;
-    transparentMaterial.uniforms.uWireframe.value = material.wireframe;
-    e.target.textContent = material.wireframe ? 'ON' : 'OFF';
-  });
-
-  // Hide loading, reveal UI
-  document.getElementById('loading').classList.add('hidden');
-  document.body.classList.add('ready');
-
-  // ── Perf test mode ──
-  if (PERF_MODE) {
-    // Hide interactive UI elements
-    for (const sel of ['.header', '.stats-panel', '.tech-badge', '.brush-toolbar',
-                        '.block-toolbar', '.crosshair']) {
-      const el = document.querySelector(sel);
-      if (el) el.style.display = 'none';
-    }
-
-    const perfHUD = createPerfHUD();
-    const flythrough = new PerfFlythrough(camera);
-    let lastTime = performance.now();
-
-    function perfAnimate() {
-      const now = performance.now();
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
-
-      flythrough.update(dt);
-
-      const camPos = camera.position;
-      const cameraCX = Math.floor(camPos.x / CHUNK_SIZE);
-      const cameraCZ = Math.floor(camPos.z / CHUNK_SIZE);
-      material.uniforms.uCameraTarget.value.copy(camPos);
-      transparentMaterial.uniforms.uCameraTarget.value.copy(camPos);
-
-      chunkManager.update(cameraCX, cameraCZ);
-
-      updateShadow(camPos);
-      renderShadowPass();
-      renderer.render(scene, camera);
-
-      const frameMs = performance.now() - now;
-      flythrough.recordFrame(frameMs);
-
-      updatePerfHUD(flythrough, chunkManager);
-
-      if (flythrough.done) {
-        // Final render pass to get accurate triangle count
-        renderer.render(scene, camera);
-        const report = flythrough.getReport(chunkManager, renderer);
-        showPerfReport(report, flythrough.frameTimes);
-
-        // Allow re-run with R key
-        window.addEventListener('keydown', (e) => {
-          if (e.code === 'KeyR') window.location.reload();
-        });
-        return;
-      }
-
-      requestAnimationFrame(perfAnimate);
-    }
-
-    requestAnimationFrame(perfAnimate);
-    return;
-  }
-
-  // ── Normal mode ──
-  // FPS counter
-  let fpsFrames = 0;
-  let fpsLastUpdate = performance.now();
-  const fpsEl = document.getElementById('stat-fps');
-
-  let lastCameraCX = null;
-  let lastCameraCZ = null;
-  let lastTime = performance.now();
-
-  function animate() {
-    requestAnimationFrame(animate);
-
-    const now = performance.now();
-    const dt = (now - lastTime) / 1000;
-    lastTime = now;
-
-    mover.update(dt);
-
-    // Determine camera chunk position from camera pos
-    const camPos = camera.position;
-    const cameraCX = Math.floor(camPos.x / CHUNK_SIZE);
-    const cameraCZ = Math.floor(camPos.z / CHUNK_SIZE);
-
-    // Update fog center to camera position
-    material.uniforms.uCameraTarget.value.copy(camPos);
-    transparentMaterial.uniforms.uCameraTarget.value.copy(camPos);
-
-    chunkManager.update(cameraCX, cameraCZ);
-    lastCameraCX = cameraCX;
-    lastCameraCZ = cameraCZ;
-
-    // Process gradual remesh queue (mesher mode toggle)
-    if (remeshQueue.length > 0) {
-      processRemeshQueue();
-    }
-
-    // Hover highlight (always from screen center in first person)
-    const ht = getTargetBlock(raycaster, screenCenter, camera, chunkManager);
-    if (ht) {
-      rebuildHighlight(ht.normal);
-      hlGroup.position.set(ht.breakPos.x + 0.5, ht.breakPos.y + 0.5, ht.breakPos.z + 0.5);
-      hlGroup.visible = true;
-    } else {
-      hlGroup.visible = false;
-    }
-
-    // Shadow pass + main render
-    updateShadow(camPos);
-    renderShadowPass();
-    renderer.render(scene, camera);
-
-    // Stats update after render so renderer.info reflects this frame
-    fpsFrames++;
-    if (now - fpsLastUpdate >= 500) {
-      fpsEl.textContent = Math.round(fpsFrames / ((now - fpsLastUpdate) / 1000));
-      fpsFrames = 0;
-      fpsLastUpdate = now;
-      updateStats(renderer, chunkManager);
-    }
-  }
-  animate();
-}
-
-main().catch(err => {
-  console.error('Failed to initialize:', err);
-  document.querySelector('.loading-text').textContent = 'Error — check console';
-});
-</script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111516" />
+    <meta
+      name="description"
+      content="Explore voxel surfaces, dense material grids, and scalar volumes in the Urath performance lab. Rust, WebAssembly, and Three.js."
+    />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Urath — the voxel rendering lab</title>
+    <link rel="stylesheet" href="./src/style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <a class="brand" href="./" aria-label="Urath home"
+        ><svg
+          class="brand-icon"
+          viewBox="0 0 32 36"
+          fill="none"
+          aria-hidden="true"
+        >
+          <path
+            d="M16 2 30 10v16l-14 8L2 26V10Z"
+            stroke="currentColor"
+            stroke-width="1.6"
+          />
+          <path
+            d="m2 10 14 8 14-8M16 18v16M9 6l14 8v16M23 6 9 14v16M2 18l14 8 14-8"
+            stroke="currentColor"
+            stroke-width="1.2"
+          />
+        </svg>
+        urath<span class="lab">THE VOXEL RENDERING LAB</span></a
+      >
+      <div class="header-right">
+        <span class="version"
+          ><span class="status-dot"></span> v0.1 / developer preview</span
+        ><a
+          href="https://github.com/LachyFS/urath"
+          target="_blank"
+          rel="noreferrer"
+          >Source ↗</a
+        >
+      </div>
+    </header>
+    <main class="workspace">
+      <aside class="sidebar">
+        <div class="intro">
+          <div class="eyebrow">SMALL VOXELS. BIG IDEAS.</div>
+          <h1>A world in<br />every voxel.</h1>
+          <p>
+            Explore dense 3D data. Find the right renderer. Measure every view.
+          </p>
+        </div>
+        <form id="dataset-form">
+          <div class="section-title">
+            <span>01 / DATASET</span><span class="tag">LOCAL</span>
+          </div>
+          <label for="dataset">Sample data</label>
+          <select id="dataset">
+            <option value="model">Strata · coloured model</option>
+            <option value="solid">Solid · one material</option>
+            <option value="multimaterial">Solid · alternating materials</option>
+            <option value="porous">Porous · deterministic noise</option>
+            <option value="terrain">Terrain · layered landscape</option>
+            <option value="phantom">Volume · scalar phantom</option>
+          </select>
+          <div class="field-row">
+            <div>
+              <label for="size">Grid dimensions</label
+              ><select id="size">
+                <option>32</option>
+                <option selected>64</option>
+                <option>128</option>
+                <option>256</option>
+              </select>
+            </div>
+            <div>
+              <label for="budget">Memory budget</label
+              ><select id="budget">
+                <option value="64">64 MiB</option>
+                <option value="128">128 MiB</option>
+                <option value="256" selected>256 MiB</option>
+                <option value="512">512 MiB</option>
+              </select>
+            </div>
+          </div>
+          <div class="field-row">
+            <div>
+              <label for="chunk-size">Surface chunk</label
+              ><select id="chunk-size">
+                <option>8</option>
+                <option selected>16</option>
+                <option>32</option>
+              </select>
+            </div>
+            <div>
+              <label for="worker-count">Workers</label
+              ><select id="worker-count">
+                <option>1</option>
+                <option selected>2</option>
+                <option>4</option>
+              </select>
+            </div>
+          </div>
+          <button class="primary" id="load" type="submit">
+            Load dataset <span>↗</span>
+          </button>
+          <button id="cancel" type="button" hidden>Cancel loading</button>
+        </form>
+        <details class="import-panel">
+          <summary>Bring your own data <span>+</span></summary>
+          <p>
+            Raw, little-endian samples. X varies fastest. Files stay on this
+            device.
+          </p>
+          <label for="raw-type">Data type</label
+          ><select id="raw-type">
+            <option value="uint16">Uint16 · material IDs (0 = empty)</option>
+            <option value="uint16-scalar">Uint16 · scalar values</option>
+            <option value="float32">Float32 · scalar values</option>
+            <option value="uint8">Uint8 · scalar values</option></select
+          ><label for="raw-dimensions">Dimensions (X, Y, Z)</label
+          ><input
+            id="raw-dimensions"
+            value="64, 64, 64"
+            aria-label="Raw dimensions"
+          /><label for="raw-spacing">Voxel spacing (X, Y, Z)</label
+          ><input id="raw-spacing" value="1, 1, 1" /><label
+            class="file-label"
+            for="raw-file"
+            >Choose .raw / .bin file</label
+          ><input id="raw-file" type="file" accept=".raw,.bin" />
+        </details>
+        <section class="render-controls">
+          <div class="section-title">02 / VIEW</div>
+          <label for="material-backend">Material rendering</label>
+          <select id="material-backend">
+            <option value="mesh">Greedy mesh · editable surfaces</option>
+            <option value="raycast">
+              Direct voxels · dense / fragmented grids
+            </option>
+          </select>
+          <label for="render-mode">Rendering mode</label
+          ><select id="render-mode">
+            <option value="surface">Block surfaces</option>
+            <option value="volume">Volume</option>
+            <option value="isosurface">Scalar isosurface</option>
+          </select>
+          <div id="volume-controls" hidden>
+            <label for="quality"
+              >Ray sample limit <output id="quality-value">256</output></label
+            ><input
+              id="quality"
+              type="range"
+              min="32"
+              max="1024"
+              step="32"
+              value="256"
+            /><label for="opacity"
+              >Opacity <output id="opacity-value">0.08</output></label
+            ><input
+              id="opacity"
+              type="range"
+              min="0"
+              max="0.4"
+              step="0.01"
+              value="0.08"
+            /><label for="threshold"
+              >Scalar threshold
+              <output id="threshold-value">0.45</output></label
+            ><input
+              id="threshold"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value="0.45"
+            /><label for="clip"
+              >Z clipping <output id="clip-value">100%</output></label
+            ><input
+              id="clip"
+              type="range"
+              min="5"
+              max="100"
+              step="1"
+              value="100"
+            />
+            <div class="field-row">
+              <div>
+                <label for="range-min">Window min</label
+                ><input id="range-min" type="number" step="any" value="0" />
+              </div>
+              <div>
+                <label for="range-max">Window max</label
+                ><input id="range-max" type="number" step="any" value="1" />
+              </div>
+            </div>
+            <label for="transfer">Colour / opacity map</label
+            ><select id="transfer">
+              <option value="warm">Ember</option>
+              <option value="cool">Glacier</option>
+              <option value="grayscale">Grayscale</option>
+            </select>
+            <p class="note">
+              Native scalar storage. Regional edits upload only changed areas.
+            </p>
+          </div>
+          <div class="button-row">
+            <button id="edit" disabled>Update a region</button
+            ><button id="reset-camera" disabled>Fit view</button>
+          </div>
+        </section>
+        <div class="sidebar-footer">
+          <span class="status-dot"></span> Browser only. No data uploaded.
+        </div>
+      </aside>
+      <section class="stage" aria-label="Voxel data viewer">
+        <div class="stage-top">
+          <div>
+            <span class="eyebrow" id="dataset-label"
+              >STRATA / MATERIAL GRID</span
+            >
+            <h2 id="dataset-title">64 × 64 × 64</h2>
+            <p id="dataset-summary" class="dataset-summary">
+              Preparing your view
+            </p>
+          </div>
+          <span class="status" id="status" role="status" aria-live="polite"
+            >Preparing</span
+          >
+        </div>
+        <div id="viewport">
+          <div class="orientation">
+            <span class="axis x">X</span><span class="axis y">Y</span
+            ><span class="axis z">Z</span
+            ><span>DRAG TO ORBIT · SCROLL TO ZOOM</span>
+          </div>
+          <div class="renderer-badge">
+            <span class="status-dot"></span
+            ><span id="renderer-label">GREEDY SURFACE</span>
+          </div>
+        </div>
+        <div id="error" role="alert" hidden></div>
+        <div class="loading" id="loading">
+          <span class="spinner"></span
+          ><span id="loading-text">Preparing dataset…</span
+          ><progress id="progress" max="1" value="0"></progress>
+        </div>
+
+        <div class="capture">
+          <div>
+            <span class="eyebrow">REPRODUCIBLE CAMERA PATH</span>
+            <p id="capture-description">
+              Capture 10 seconds of orbiting this dataset.
+            </p>
+          </div>
+          <button id="benchmark" disabled>Run benchmark <span>→</span></button
+          ><button id="export" disabled aria-label="Export benchmark JSON">
+            Export JSON ↓
+          </button>
+        </div>
+        <div class="metrics" aria-label="Performance measurements">
+          <div>
+            <span>FRAME INTERVAL · P95</span><strong id="frame-p95">—</strong
+            ><small>last 120 frames</small>
+          </div>
+          <div>
+            <span>FIRST FRAME</span><strong id="first-frame">—</strong
+            ><small>generate / load → display</small>
+          </div>
+          <div>
+            <span>MANAGED MEMORY</span><strong id="memory">—</strong
+            ><small>buffer estimate, includes GPU</small>
+          </div>
+          <div>
+            <span id="geometry-label">TRIANGLES</span
+            ><strong id="triangles">—</strong
+            ><small id="geometry-note">visible surface geometry</small>
+          </div>
+        </div>
+        <div class="detail-strip">
+          <span id="detail-data">—</span
+          ><span id="gpu-time">GPU time: unavailable</span
+          ><span id="update-time">Update latency: —</span>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./src/main.js"></script>
+  </body>
 </html>

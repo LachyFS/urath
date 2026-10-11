@@ -1,0 +1,108 @@
+{
+  "timestamp": "2026-10-10T23:21:41.136Z",
+  "buildSha256": "70c7999906f1681ffe1bb89a0318bd077f3a4b8531ac5a31170bae4166a7b7dd",
+  "results": [
+    {
+      "fixture": "voxel-dense",
+      "size": 512,
+      "pixels": 1024,
+      "samplesPerRay": null,
+      "opacity": null,
+      "constructionMs": 320.59999990463257,
+      "views": [
+        {
+          "view": "overview",
+          "gpuMs": {
+            "count": 64,
+            "p50": 3.06657,
+            "p95": 3.40775,
+            "max": 3.50196
+          }
+        },
+        {
+          "view": "close",
+          "gpuMs": {
+            "count": 64,
+            "p50": 2.17759,
+            "p95": 2.49928,
+            "max": 2.55851
+          }
+        }
+      ],
+      "scatteredEdit": {
+        "updateCpuMs": 1.3000001907348633,
+        "renderGpuMs": 44.8433,
+        "uploadedBytes": 262193024,
+        "regionUploads": 1
+      },
+      "resources": {
+        "inputBytes": 268435456,
+        "accelerationBytes": 2621440,
+        "gpuBytes": 268697632,
+        "managedBytes": 539500608,
+        "budgetBytes": 1610612736,
+        "uploadedBytes": 530628480,
+        "fullUploads": 1,
+        "regionUploads": 1
+      },
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false,
+      "glError": 0,
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36"
+    },
+    {
+      "fixture": "volume-dense",
+      "size": 512,
+      "pixels": 1024,
+      "samplesPerRay": 1024,
+      "opacity": 0.008,
+      "constructionMs": 379.2999999523163,
+      "views": [
+        {
+          "view": "overview",
+          "gpuMs": {
+            "count": 64,
+            "p50": 207.28646,
+            "p95": 275.90867,
+            "max": 277.13852
+          }
+        },
+        {
+          "view": "close",
+          "gpuMs": {
+            "count": 64,
+            "p50": 211.49308,
+            "p95": 232.04425,
+            "max": 233.42969
+          }
+        }
+      ],
+      "scatteredEdit": {
+        "updateCpuMs": 0.20000004768371582,
+        "renderGpuMs": 299.61665,
+        "uploadedBytes": 524386048,
+        "regionUploads": 1
+      },
+      "resources": {
+        "inputBytes": 536870912,
+        "gpuBytes": 537135104,
+        "managedBytes": 1076371456,
+        "budgetBytes": 1610612736,
+        "textureDimensions": [
+          512,
+          512,
+          512
+        ],
+        "maxSteps": 1024,
+        "accelerationBytes": 2621440,
+        "uploadedBytes": 1061256960,
+        "fullUploads": 1,
+        "regionUploads": 1
+      },
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false,
+      "glError": 0,
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36"
+    }
+  ]
+}

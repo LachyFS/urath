@@ -5,3 +5,8 @@ packages/*/wasm/
 pkg/
 .DS_Store
 .playwright-mcp
+examples/demo/dist/
+test-results/
+playwright-report/
+artifacts/
+*.tgz
