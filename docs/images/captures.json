@@ -3,7 +3,6 @@
     "name": "lab",
     "dataset": "model",
     "size": 64,
-    "full": true,
     "camera": [
       96.27990736534232,
       73.78193978747251,
@@ -26,7 +25,7 @@
       "triangles": 22376,
       "meshJobs": 64,
       "discardedJobs": 0,
-      "totalMeshMs": 22.999999523162842
+      "totalMeshMs": 21.600000619888306
     },
     "mode": "surface",
     "controls": {
@@ -43,7 +42,8 @@
       1600,
       1060
     ],
-    "deviceScaleFactor": 1.5
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
   },
   {
     "name": "volume",
@@ -89,7 +89,8 @@
       1600,
       1060
     ],
-    "deviceScaleFactor": 1.5
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
   },
   {
     "name": "terrain",
@@ -117,7 +118,7 @@
       "triangles": 68234,
       "meshJobs": 512,
       "discardedJobs": 0,
-      "totalMeshMs": 57.20000100135803
+      "totalMeshMs": 51.10000205039978
     },
     "mode": "surface",
     "controls": {
@@ -134,6 +135,7 @@
       1600,
       1060
     ],
-    "deviceScaleFactor": 1.5
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
   }
 ]

@@ -3,7 +3,8 @@ import { resolve } from "node:path";
 import { chromium } from "@playwright/test";
 import { serveDirectory } from "./serve-directory.mjs";
 
-// Real production UI captures. Do not replace measurements or composite renders.
+// Capture the production renderer with its interface overlays hidden.
+// Keep the actual geometry, colours, and camera; do not composite renders.
 const root = resolve(import.meta.dirname, "..");
 const destination = resolve(root, "docs/images");
 await mkdir(destination, { recursive: true });
@@ -18,7 +19,7 @@ const browser = await chromium.launch({
 const records = [];
 try {
   for (const shot of [
-    { name: "lab", dataset: "model", size: 64, full: true },
+    { name: "lab", dataset: "model", size: 64 },
     { name: "volume", dataset: "phantom", size: 128, mode: "volume" },
     { name: "terrain", dataset: "terrain", size: 128 },
   ]) {
@@ -55,8 +56,14 @@ try {
     await page.waitForFunction(
       () => document.getElementById("frame-p95").textContent !== "—",
     );
-    // Let the actual GPU metrics settle and the final frame reach the compositor.
-    await page.waitForTimeout(1800);
+    // Only the viewport is captured. Captions and technical details belong in
+    // the README, rather than over the rendered data.
+    await page.addStyleTag({
+      content: `
+      .stage-top, .orientation, .renderer-badge { visibility: hidden !important; }
+    `,
+    });
+    await page.waitForTimeout(500);
     if (errors.length) throw new Error(errors.join("\n"));
     const state = await page.evaluate(() => {
       const { renderer, current, camera } = window.urathTest;
@@ -79,17 +86,16 @@ try {
     });
     if (state.glError) throw new Error(`WebGL error: ${state.glError}`);
     const path = resolve(destination, `${shot.name}.png`);
-    if (shot.full) await page.screenshot({ path });
-    else
-      await page.screenshot({
-        path,
-        clip: await page.locator("#viewport").boundingBox(),
-      });
+    await page.screenshot({
+      path,
+      clip: await page.locator("#viewport").boundingBox(),
+    });
     records.push({
       ...shot,
       ...state,
       viewport: [1600, 1060],
       deviceScaleFactor: 1.5,
+      capture: "viewport with interface overlays hidden",
     });
     console.log(`Captured ${path}`);
     await page.close();

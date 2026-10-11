@@ -10,7 +10,7 @@
   <a href="docs/performance-storage.md">Performance measurements</a>
 </p>
 
-![The Urath performance lab: a layered voxel model, dataset controls, and live rendering measurements](docs/images/lab.png)
+![A layered voxel model rendered by Urath](docs/images/lab.png)
 
 Urath turns typed arrays into interactive 3D views. Mesh editable block worlds, trace dense material grids directly on the GPU, or explore scalar data with transfer functions and clipping. Bring your own Three.js scene, camera, and render loop.
 
@@ -29,7 +29,7 @@ Urath turns typed arrays into interactive 3D views. Mesh editable block worlds, 
   </tr>
 </table>
 
-_Actual Chromium captures of the production demo, using generated fixtures. The figures in screenshots are live observations, not portable benchmark claims. [Capture settings and reproduction](docs/images/README.md)._
+_Rendered in Chromium with Urath. [Capture settings and reproduction](docs/images/README.md)._
 
 ## Choose a rendering path
 

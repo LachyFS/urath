@@ -1,14 +1,14 @@
 # README screenshots
 
-These images are captured from Urath's production performance lab. The UI, geometry, colours, and measurements are real browser output; the capture script does not replace metric text or composite renders.
+These images are viewport captures from Urath's production performance lab. The capture script hides interface overlays and crops out the controls and metrics. Geometry, colours, lighting, and backgrounds remain real browser output; renders are not composited or retouched.
 
 | Image         | Fixture              | Rendering                                 |
 | ------------- | -------------------- | ----------------------------------------- |
-| `lab.png`     | 64³ Strata model     | Full interface, Rust/WASM greedy surface  |
+| `lab.png`     | 64³ Strata model     | Rust/WASM greedy surface, viewport crop   |
 | `terrain.png` | 128³ layered terrain | Greedy surface, viewport crop             |
 | `volume.png`  | 128³ scalar phantom  | Volume, 512 maximum samples, 0.14 opacity |
 
-The desktop viewport is 1600 × 1060 CSS pixels at device scale 1.5. Scalar views are zoomed using the normal orbit controls. `captures.json` records the actual camera, settings, resource statistics, browser, and GPU. Timing values visible in the full screenshot describe that capture session; use the benchmark reports for comparisons.
+The desktop viewport is 1600 × 1060 CSS pixels at device scale 1.5. Only the rendering area appears in the saved images. Scalar views are zoomed using the normal orbit controls. `captures.json` records the actual camera, settings, resource statistics, browser, and GPU. Use the benchmark reports for performance comparisons.
 
 After installing dependencies and building:
 
