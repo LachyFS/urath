@@ -1,0 +1,25 @@
+{
+  "name": "urath-workspace",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/urath",
+    "examples/demo"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build crates/urath-wasm --target web --out-dir ../../packages/urath/wasm --release",
+    "build": "npm run build:wasm && npm run build -w @urath/threejs && npm run build -w urath-demo",
+    "dev": "npm run dev -w urath-demo -- --host 127.0.0.1",
+    "typecheck": "npm run typecheck -w @urath/threejs",
+    "test": "node --test packages/urath/test/*.test.mjs",
+    "test:browser": "playwright test",
+    "test:package": "node scripts/test-package.mjs",
+    "screenshots": "node scripts/screenshots.mjs",
+    "benchmark": "node scripts/benchmark.mjs",
+    "benchmark:stress": "node scripts/stress-benchmark.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.57.0",
+    "wasm-pack": "0.15.0"
+  }
+}

@@ -1,0 +1,141 @@
+[
+  {
+    "name": "lab",
+    "dataset": "model",
+    "size": 64,
+    "camera": [
+      96.27990736534232,
+      73.78193978747251,
+      102.70789810187657
+    ],
+    "resources": {
+      "inputBytes": 524288,
+      "geometryBytes": 626528,
+      "materialBytes": 393216,
+      "gpuBytes": 1019778,
+      "managedBytes": 17545220,
+      "peakManagedBytes": 17545220,
+      "budgetBytes": 268435456,
+      "workerReservedBytes": 14981376,
+      "workers": 2,
+      "activeJobs": 0,
+      "pendingChunks": 0,
+      "totalChunks": 64,
+      "completedChunks": 64,
+      "triangles": 22376,
+      "meshJobs": 64,
+      "discardedJobs": 0,
+      "totalMeshMs": 21.600000619888306
+    },
+    "mode": "surface",
+    "controls": {
+      "quality": "256",
+      "opacity": "0.08",
+      "threshold": "0.45",
+      "clip": "100",
+      "transfer": "warm"
+    },
+    "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+    "glError": 0,
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+    "viewport": [
+      1600,
+      1060
+    ],
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
+  },
+  {
+    "name": "volume",
+    "dataset": "phantom",
+    "size": 128,
+    "mode": "volume",
+    "camera": [
+      207.2714902939257,
+      157.12646869105168,
+      221.5986393233183
+    ],
+    "resources": {
+      "transferCacheBytes": 0,
+      "transferCacheBuilds": 0,
+      "transferCacheUpdatedVoxels": 0,
+      "storage": "float32",
+      "inputBytes": 8388608,
+      "gpuBytes": 8394752,
+      "managedBytes": 16826953,
+      "budgetBytes": 268435456,
+      "textureDimensions": [
+        128,
+        128,
+        128
+      ],
+      "maxSteps": 512,
+      "accelerationBytes": 41545,
+      "uploadedBytes": 8388608,
+      "fullUploads": 1,
+      "regionUploads": 0
+    },
+    "controls": {
+      "quality": "512",
+      "opacity": "0.14",
+      "threshold": "0.449867042899132",
+      "clip": "100",
+      "transfer": "warm"
+    },
+    "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+    "glError": 0,
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+    "viewport": [
+      1600,
+      1060
+    ],
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
+  },
+  {
+    "name": "terrain",
+    "dataset": "terrain",
+    "size": 128,
+    "camera": [
+      216.3671878289596,
+      137.53867208882372,
+      231.6039066118556
+    ],
+    "resources": {
+      "inputBytes": 4194304,
+      "geometryBytes": 1910552,
+      "materialBytes": 1376256,
+      "gpuBytes": 3286842,
+      "managedBytes": 25749364,
+      "peakManagedBytes": 25749364,
+      "budgetBytes": 268435456,
+      "workerReservedBytes": 14981376,
+      "workers": 2,
+      "activeJobs": 0,
+      "pendingChunks": 0,
+      "totalChunks": 512,
+      "completedChunks": 512,
+      "triangles": 68234,
+      "meshJobs": 512,
+      "discardedJobs": 0,
+      "totalMeshMs": 51.10000205039978
+    },
+    "mode": "surface",
+    "controls": {
+      "quality": "256",
+      "opacity": "0.08",
+      "threshold": "0.45",
+      "clip": "100",
+      "transfer": "warm"
+    },
+    "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+    "glError": 0,
+    "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+    "viewport": [
+      1600,
+      1060
+    ],
+    "deviceScaleFactor": 1.5,
+    "capture": "viewport with interface overlays hidden"
+  }
+]

@@ -1,13 +1,9 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from "vite";
 
 export default defineConfig({
-  server: {
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    },
-  },
+  resolve: { dedupe: ["three"] },
   optimizeDeps: {
-    exclude: ['./pkg/urath_wasm.js'],
+    exclude: ["@urath/threejs"],
   },
+  build: { rollupOptions: { output: { manualChunks: { three: ["three"] } } } },
 });

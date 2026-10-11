@@ -1,0 +1,386 @@
+[
+  {
+    "schemaVersion": 1,
+    "capturedAt": "2026-10-10T22:29:45.111Z",
+    "durationMs": 10017,
+    "dataset": {
+      "label": "Solid · one material",
+      "dimensions": [
+        256,
+        256,
+        256
+      ],
+      "spacing": [
+        1,
+        1,
+        1
+      ],
+      "kind": "material",
+      "sourceBytes": 33554432,
+      "seed": 123456789,
+      "fixture": "solid",
+      "fixtureVersion": 1,
+      "edits": [
+        {
+          "offset": [
+            107,
+            107,
+            107
+          ],
+          "dimensions": [
+            42,
+            42,
+            42
+          ],
+          "operation": "fill",
+          "value": 0
+        }
+      ],
+      "backend": "mesh"
+    },
+    "mode": "surface",
+    "firstFrameMs": 272.90000009536743,
+    "updateToVisibleMs": 47.60000014305115,
+    "frameIntervalMs": {
+      "count": 600,
+      "mean": 16.665999999999986,
+      "p50": 16.699999999999818,
+      "p95": 16.799999999999272,
+      "p99": 16.800000000000182,
+      "max": 16.80000000000109
+    },
+    "cpuRenderSubmissionMs": {
+      "count": 601,
+      "mean": 1.8773710497603837,
+      "p50": 1.5999999046325684,
+      "p95": 2.700000047683716,
+      "p99": 2.700000047683716,
+      "max": 2.8000001907348633
+    },
+    "gpuRenderMs": {
+      "count": 120,
+      "mean": 0.4609181666666667,
+      "p50": 0.40452,
+      "p95": 0.73896,
+      "p99": 0.75916,
+      "max": 0.77648
+    },
+    "resources": {
+      "inputBytes": 33554432,
+      "geometryBytes": 98112,
+      "materialBytes": 0,
+      "gpuBytes": 98146,
+      "managedBytes": 48732100,
+      "peakManagedBytes": 48732100,
+      "budgetBytes": 268435456,
+      "workerReservedBytes": 14981376,
+      "workers": 2,
+      "activeJobs": 0,
+      "pendingChunks": 0,
+      "totalChunks": 4096,
+      "completedChunks": 4096,
+      "triangles": 3504,
+      "meshJobs": 4160,
+      "discardedJobs": 0,
+      "totalMeshMs": 160.400000333786
+    },
+    "cameraPath": {
+      "center": [
+        128,
+        128,
+        128
+      ],
+      "radius": 494.4309375740099,
+      "elevation": 222.49392190830446,
+      "fov": 45,
+      "durationMs": 10000
+    },
+    "settings": {
+      "chunkSize": 16,
+      "materialBackend": "mesh",
+      "workers": 2,
+      "maxSteps": 256,
+      "opacity": 0.08,
+      "threshold": 0.45,
+      "range": [
+        0,
+        1
+      ],
+      "clipMaxZ": 1,
+      "transfer": "warm"
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+      "hardwareConcurrency": 16,
+      "threeRevision": "172",
+      "viewport": [
+        980,
+        584
+      ],
+      "pixelRatio": 1,
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false
+    },
+    "notes": [
+      "Memory is an estimate of managed buffers, not total browser process memory.",
+      "CPU render submission is not GPU time.",
+      "GPU timings are optional, asynchronous, and represent the most recent 120 available samples.",
+      "Volume mode uses resident textures, conservative brick skipping, and regional uploads."
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "capturedAt": "2026-10-10T22:29:56.575Z",
+    "durationMs": 10015.299999952316,
+    "dataset": {
+      "label": "Solid · alternating materials",
+      "dimensions": [
+        256,
+        256,
+        256
+      ],
+      "spacing": [
+        1,
+        1,
+        1
+      ],
+      "kind": "material",
+      "sourceBytes": 33554432,
+      "seed": 123456789,
+      "fixture": "multimaterial",
+      "fixtureVersion": 1,
+      "edits": [
+        {
+          "offset": [
+            107,
+            107,
+            107
+          ],
+          "dimensions": [
+            42,
+            42,
+            42
+          ],
+          "operation": "fill",
+          "value": 0
+        }
+      ],
+      "backend": "mesh"
+    },
+    "mode": "surface",
+    "firstFrameMs": 272.7000000476837,
+    "updateToVisibleMs": 47.90000009536743,
+    "frameIntervalMs": {
+      "count": 600,
+      "mean": 16.665833333333318,
+      "p50": 16.699999999999818,
+      "p95": 16.799999999999272,
+      "p99": 16.800000000000182,
+      "max": 16.80000000000109
+    },
+    "cpuRenderSubmissionMs": {
+      "count": 601,
+      "mean": 2.0722129813049874,
+      "p50": 1.7000000476837158,
+      "p95": 3.1999998092651367,
+      "p99": 3.200000047683716,
+      "max": 3.3000001907348633
+    },
+    "gpuRenderMs": {
+      "count": 120,
+      "mean": 0.65406075,
+      "p50": 0.59668,
+      "p95": 1.01396,
+      "p99": 1.06684,
+      "max": 1.08512
+    },
+    "resources": {
+      "inputBytes": 33554432,
+      "geometryBytes": 98112,
+      "materialBytes": 11534336,
+      "gpuBytes": 11632482,
+      "managedBytes": 71800772,
+      "peakManagedBytes": 71800772,
+      "budgetBytes": 268435456,
+      "workerReservedBytes": 14981376,
+      "workers": 2,
+      "activeJobs": 0,
+      "pendingChunks": 0,
+      "totalChunks": 4096,
+      "completedChunks": 4096,
+      "triangles": 3504,
+      "meshJobs": 4160,
+      "discardedJobs": 0,
+      "totalMeshMs": 175.59999871253967
+    },
+    "cameraPath": {
+      "center": [
+        128,
+        128,
+        128
+      ],
+      "radius": 494.4309375740099,
+      "elevation": 222.49392190830446,
+      "fov": 45,
+      "durationMs": 10000
+    },
+    "settings": {
+      "chunkSize": 16,
+      "materialBackend": "mesh",
+      "workers": 2,
+      "maxSteps": 256,
+      "opacity": 0.08,
+      "threshold": 0.45,
+      "range": [
+        0,
+        1
+      ],
+      "clipMaxZ": 1,
+      "transfer": "warm"
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+      "hardwareConcurrency": 16,
+      "threeRevision": "172",
+      "viewport": [
+        980,
+        584
+      ],
+      "pixelRatio": 1,
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false
+    },
+    "notes": [
+      "Memory is an estimate of managed buffers, not total browser process memory.",
+      "CPU render submission is not GPU time.",
+      "GPU timings are optional, asynchronous, and represent the most recent 120 available samples.",
+      "Volume mode uses resident textures, conservative brick skipping, and regional uploads."
+    ]
+  },
+  {
+    "schemaVersion": 1,
+    "capturedAt": "2026-10-10T22:30:08.124Z",
+    "durationMs": 10015.799999952316,
+    "dataset": {
+      "label": "Volume · scalar phantom",
+      "dimensions": [
+        256,
+        256,
+        256
+      ],
+      "spacing": [
+        1,
+        1,
+        1
+      ],
+      "kind": "scalar",
+      "sourceBytes": 67108864,
+      "seed": 123456789,
+      "fixture": "phantom",
+      "fixtureVersion": 1,
+      "edits": [
+        {
+          "offset": [
+            107,
+            107,
+            107
+          ],
+          "dimensions": [
+            42,
+            42,
+            42
+          ],
+          "operation": "fill",
+          "value": 0.9999210834503174
+        }
+      ],
+      "backend": "volume"
+    },
+    "mode": "volume",
+    "firstFrameMs": 376.7000000476837,
+    "updateToVisibleMs": 31.299999952316284,
+    "frameIntervalMs": {
+      "count": 600,
+      "mean": 16.665833333333335,
+      "p50": 16.699999999999818,
+      "p95": 16.700000000000728,
+      "p99": 16.80000000000109,
+      "max": 16.80000000000109
+    },
+    "cpuRenderSubmissionMs": {
+      "count": 601,
+      "mean": 0.05257903597319186,
+      "p50": 0,
+      "p95": 0.20000004768371582,
+      "p99": 0.20000004768371582,
+      "max": 0.3000001907348633
+    },
+    "gpuRenderMs": {
+      "count": 120,
+      "mean": 6.886470500000004,
+      "p50": 7.01488,
+      "p95": 8.34456,
+      "p99": 8.69208,
+      "max": 8.73072
+    },
+    "resources": {
+      "inputBytes": 67108864,
+      "gpuBytes": 67143680,
+      "managedBytes": 134553600,
+      "budgetBytes": 268435456,
+      "textureDimensions": [
+        256,
+        256,
+        256
+      ],
+      "maxSteps": 256,
+      "accelerationBytes": 327680,
+      "uploadedBytes": 67405216,
+      "fullUploads": 1,
+      "regionUploads": 1
+    },
+    "cameraPath": {
+      "center": [
+        128,
+        128,
+        128
+      ],
+      "radius": 494.4309375740099,
+      "elevation": 222.49392190830446,
+      "fov": 45,
+      "durationMs": 10000
+    },
+    "settings": {
+      "chunkSize": null,
+      "materialBackend": "volume",
+      "workers": 0,
+      "maxSteps": 256,
+      "opacity": 0.08,
+      "threshold": 0.449964487552643,
+      "range": [
+        0,
+        0.9999210834503174
+      ],
+      "clipMaxZ": 1,
+      "transfer": "warm"
+    },
+    "environment": {
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36",
+      "hardwareConcurrency": 16,
+      "threeRevision": "172",
+      "viewport": [
+        980,
+        584
+      ],
+      "pixelRatio": 1,
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false
+    },
+    "notes": [
+      "Memory is an estimate of managed buffers, not total browser process memory.",
+      "CPU render submission is not GPU time.",
+      "GPU timings are optional, asynchronous, and represent the most recent 120 available samples.",
+      "Volume mode uses resident textures, conservative brick skipping, and regional uploads."
+    ]
+  }
+]

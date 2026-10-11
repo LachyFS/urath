@@ -1,0 +1,72 @@
+{
+  "timestamp": "2026-10-11T00:05:41.665Z",
+  "buildSha256": "1bf8b81985ebac4c4488f41848f09b8131622dd3660eded1ff2f2d83535b86ff",
+  "results": [
+    {
+      "fixture": "volume-dense",
+      "shaderVariant": "production",
+      "inputType": "float32",
+      "forceFloat32": false,
+      "transferCache": true,
+      "size": 512,
+      "pixels": 1024,
+      "samplesPerRay": 1024,
+      "opacity": 0.008,
+      "constructionMs": 385.10000014305115,
+      "firstDraw": {
+        "gpuMs": 253.83746,
+        "wallMs": 296.59999990463257
+      },
+      "views": [
+        {
+          "view": "overview",
+          "gpuMs": {
+            "count": 64,
+            "p50": 176.37566,
+            "p95": 249.40275,
+            "max": 249.88934
+          }
+        },
+        {
+          "view": "close",
+          "gpuMs": {
+            "count": 64,
+            "p50": 124.51476,
+            "p95": 137.8578,
+            "max": 138.3229
+          }
+        }
+      ],
+      "scatteredEdit": {
+        "updateCpuMs": 0.2999999523162842,
+        "renderGpuMs": 137.29764,
+        "uploadedBytes": 512,
+        "regionUploads": 2
+      },
+      "resources": {
+        "transferCacheBytes": 134217728,
+        "transferCacheBuilds": 2,
+        "transferCacheUpdatedVoxels": 134217856,
+        "storage": "float32",
+        "inputBytes": 536870912,
+        "gpuBytes": 671352832,
+        "managedBytes": 1210626633,
+        "budgetBytes": 1610612736,
+        "textureDimensions": [
+          512,
+          512,
+          512
+        ],
+        "maxSteps": 1024,
+        "accelerationBytes": 2658889,
+        "uploadedBytes": 536871424,
+        "fullUploads": 1,
+        "regionUploads": 2
+      },
+      "gpu": "ANGLE (AMD, Vulkan 1.4.335 (AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO) (0x000013C0)), radv)",
+      "softwareGpu": false,
+      "glError": 0,
+      "userAgent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/143.0.7499.4 Safari/537.36"
+    }
+  ]
+}
